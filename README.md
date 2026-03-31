@@ -1,0 +1,2 @@
+# Bidcoin
+For best bid
