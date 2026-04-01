@@ -1,0 +1,61 @@
+# Recommended environment:
+#   Python 3.12
+#   python -m pip install -U pip setuptools wheel
+#   pip install -r requirements.txt
+#
+# Notes:
+# - This file covers the project's full working set: data processing, document loading,
+#   HWP/PDF handling, chunking, embedding, vector search, Hugging Face generation,
+#   LangChain integration, API-based LLM expansion, app serving, and testing.
+# - Some HWP workflows still work better with system tools such as `hwp5txt` or `libreoffice`.
+# - `bitsandbytes` is intentionally excluded here because it is GPU/CUDA sensitive.
+
+# Core data processing
+pandas
+numpy
+scikit-learn
+rank-bm25
+
+# Document parsing and file handling
+olefile
+pyhwp
+pypdf
+pdfplumber
+python-docx
+
+# Hugging Face / local model stack
+torch
+transformers
+sentence-transformers
+accelerate
+
+# Vector stores
+faiss-cpu
+chromadb
+
+# LangChain stack
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+
+# API-based model expansion
+openai
+anthropic
+google-generativeai
+cohere
+tiktoken
+
+# App / serving
+streamlit
+fastapi
+uvicorn
+
+# Notebook integration
+ipykernel
+jupyter
+notebook
+
+# Testing
+pytest
