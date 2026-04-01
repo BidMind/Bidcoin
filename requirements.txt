@@ -1,7 +1,9 @@
 # Recommended environment:
 #   Python 3.12
-#   python -m pip install -U pip setuptools wheel
-#   pip install -r requirements.txt
+# If you already have a virtual environment or conda environment:
+#   1) activate that environment
+#   2) python -m pip install --upgrade "pip<26" "setuptools==81.0.0" wheel
+#   3) python -m pip install -r requirements.txt
 #
 # Notes:
 # - This file covers the project's full working set: data processing, document loading,
