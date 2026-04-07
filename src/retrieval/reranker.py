@@ -1,4 +1,11 @@
 # cross-encoder
+import os
+import sys
+# 프로젝트 루트 경로를 시스템 경로에 추가하여 모듈 임포트가 원활하도록 설정
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
+
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
