@@ -1,8 +1,16 @@
+import sys
 import os
 import pandas as pd
 import json
 
-# 1. 방금 만든 모듈들 불러오기
+# 1. 현재 스크립트(module_test.py) 위치에서 한 단계 위(Bidcoin 폴더)의 절대 경로를 찾음
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+# 2. 파이썬이 모듈을 찾는 경로(sys.path)에 프로젝트 루트를 강제 추가
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+# --- 이제부터는 부모 폴더에 있는 파일들을 정상적으로 불러올 수 있습니다! ---
 import config
 from src.embedding.vector_store import build_and_save_db
 from rag_api import get_rag_context

@@ -1,8 +1,11 @@
 import config
+import math
 import json
 import uuid
 from src.retrieval.retriever import retrieve_candidates
 from src.retrieval.reranker import rerank_and_score
+
+SCORE_THRESHOLD = 0.8  # 랭킹 점수 임계값
 
 def get_rag_context(query: str, chat_history: list = []):
     """
@@ -18,6 +21,17 @@ def get_rag_context(query: str, chat_history: list = []):
     # context 리스트 생성: 최종적으로 랭킹된 문서 리스트 반환
     contexts = []
     for score, doc in top_docs:
+        if score < SCORE_THRESHOLD:
+            source_file = doc.metadata.get("source", "unknown")
+            
+            text_preview = doc.page_content[:100].replace("\n", " ") + "..."  # 간단한 텍스트 미리보기
+            print("/n" + "-"*60)
+            print(f" [Debug] 문서 필터링 됨 (커트라인 미달)")
+            print(f" 출처: {source_file}")
+            print(f" 점수: {score:.2f} (기준: {SCORE_THRESHOLD})")
+            print(f" 미리보기: {text_preview}")
+            print("/n" + "-"*60)
+            break
         # 파일명 추출
         source_file = doc.metadata.get("source", "unknown")
 
@@ -31,7 +45,7 @@ def get_rag_context(query: str, chat_history: list = []):
             "organization": parts[0] if len(parts) > 0 else "unknown", # 기관명 유추
             "project_name": parts[1] if len(parts) > 1 else "source_file", # 사업명 유추
             "summary": doc.page_content[:100].replace("\n", " ") + "...", # 간단한 요약 (앞 100자)
-            "score": round(score, 4) # Sigmoid 점수 (0~1 사이, 소수점 4자리로 반올림)
+            "score": math.trunc(score * 100) / 100 # 점수는 소수점 둘째 자리까지 표현
         })
     # 최종 반환 JSON 구조
     return {
