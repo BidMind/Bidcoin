@@ -1,89 +1,43 @@
-# cross-encoder
-import os
-import sys
-# 프로젝트 루트 경로를 시스템 경로에 추가하여 모듈 임포트가 원활하도록 설정
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(project_root)
-
 import torch
+import math
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import config
 
-def rerank_documents(query: str, candidates: list, top_n: int = 3):
+# 랭킹 모델과 토크나이저를 전역 변수로 관리하여 메모리 효율적으로 사용
+_tokenizer = None
+_model = None
+_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def _load_model():
     """
-    1차 검색된 문서(candidates)를 질문(query)과 1:1로 비교하여
-    Cross-Encoder 모델로 정확도 점수를 매기고 상위 top_n개를 반환합니다.
+    [기능] 랭킹 모델을 메모리에 로드합니다. 모델이 이미 로드되어 있다면 재사용합니다.
     """
-    if not candidates:
-        print("❌ 재정렬할 후보 문서가 없습니다.")
-        return []
+    global _tokenizer, _model
+    if _model is None:
+        _tokenizer = AutoTokenizer.from_pretrained(config.RERANK_MODEL)
+        _model = AutoModelForSequenceClassification.from_pretrained(config.RERANK_MODEL).to(_device)
+        _model.eval() # 추론 모드로 고정
 
-    print(f"\n[Step 3] BGE-Reranker v2-m3 모델로 정밀 재정렬을 시작합니다...")
-    
-    # 1. 검증된 BGE Reranker 모델 설정
-    model_name = "BAAI/bge-reranker-v2-m3"
-    
-    # 2. 로컬 GPU 사용 가능 여부 자동 감지
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"  ⚙️ 연산 디바이스: {device} (GPU 가속 시 매우 빠름)")
-    
-    # 3. 모델 및 토크나이저 로드
-    # (실무에서는 API 서버를 띄워 메모리에 상주시킵니다. 여기서는 호출 시마다 로드합니다.)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name).to(device)
-    model.eval() # 추론 모드로 설정
+def rerank_and_score(query: str, candidates: list, top_n: int = 3):
+    """
+    [기능] 1차 후보군을 질문과 1:1로 비교 채점하여 0~1 사이의 확률 점수로 랭킹합니다.
+    """
+    if not candidates: return []
+    _load_model() # 모델 준비 확인
 
-    # 4. 각 문서에 대해 질문과 연관성(Score) 계산
     scored_docs = []
-    print(f" {len(candidates)}개의 문서를 질문과 대조하여 채점 중...")
-    
+    # Cross-Encoder 채점
     for doc in candidates:
-        # 질문과 문서를 동시에(Cross) 입력으로 넣습니다.
-        inputs = tokenizer(
-            query, 
-            doc.page_content, 
-            return_tensors='pt', 
-            truncation=True, 
-            max_length=512
-        ).to(device)
+        # 질문과 문서을 토크나이저에 동시에 넣어서 하나의 텐서로 만듬
+        inputs = _tokenizer(query, doc.page_content, return_tensors="pt", truncation=True, max_length=512).to(_device)
         
-        with torch.no_grad():
-            # 모델 출력값에서 점수(logit) 추출
-            score = model(**inputs).logits[0][0].item()
-            
-        scored_docs.append((score, doc))
+        with torch.no_grad(): # 역전파 연산을 끄고 속도를 높임
+            # 모델이 BGE 특유의 로짓(Logit) 점수를 반환 (예: 4.8, 2.3, -1.5 등)
+            logit = _model(**inputs).logits[0][0].item()
 
-    # 5. 점수가 가장 높은 순으로 내림차순 정렬
-    scored_docs.sort(key=lambda x: x[0], reverse=True)
-    
-    # 6. 상위 top_n개만 잘라내기
-    best_docs = scored_docs[:top_n]
-    
-    print(f" 재정렬 완료! 최고 점수: {best_docs[0][0]:.4f}")
-    
-    # (점수, 문서객체) 형태의 리스트를 반환
-    return best_docs
+            # Logit 점수를 0~1 사이의 확률로 변환 (예: 0.99, 0.91, 0.18 등)
+            prob = 1 / (1 + math.exp(-logit))  # 0~1 사이의 확률로 변환
+        scored_docs.append((prob, doc)) # (점수, 문서) 튜플로 저장
 
-# ==========================================
-# 파이프라인 통합 테스트
-# ==========================================
-if __name__ == "__main__":
-    # search_db 모듈에서 검색 함수를 불러옵니다.
-    from search_db import search_from_saved_db
-    
-    test_query = "입찰 참여를 위한 필수 자격 요건은 무엇인가요?"
-    
-    # [1단계] FAISS에서 1차 후보군 15개 추출 (빠름)
-    faiss_candidates = search_from_saved_db(test_query, k=15)
-    
-    if faiss_candidates:
-        # [2단계] Cross-Encoder로 상위 3개 정밀 추출 (정확함)
-        final_top3 = rerank_documents(test_query, faiss_candidates, top_n=3)
-        
-        # 최종 결과 확인
-        print("\n" + "="*60)
-        print("🎯 [최종 선별된 핵심 문서 Top 3]")
-        print("="*60)
-        for i, (score, doc) in enumerate(final_top3):
-            print(f"[{i+1}위 | 유사도 점수: {score:.2f}] 출처: {doc.metadata.get('source', '알수없음')}")
-            print(f"{doc.page_content[:150]}...\n")
+    scored_docs.sort(key=lambda x: x[0], reverse=True)  # 점수 기준으로 정렬
+    return scored_docs[:top_n]
