@@ -17,10 +17,15 @@ metrics.py — RAG 평가 지표 계산 모듈
     - ragas_evaluate    : RAGAS 공식 라이브러리로 5개 지표 동시 계산
                           faithfulness / answer_relevancy / context_precision
                           context_recall / answer_correctness
+
+  [LLM-as-Judge — LLM 필요]
+    - llm_judge_evaluate : LLM이 직접 채점하는 4개 지표 동시 계산
+                           relevance / faithfulness / correctness / completeness
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import warnings
@@ -292,5 +297,189 @@ def ragas_evaluate(
     # RAGAS Score: None 값을 제외한 지표들의 평균
     valid = [v for v in output.values() if v is not None]
     output["ragas_score"] = sum(valid) / len(valid) if valid else None
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# LLM-as-Judge 지표 (LLM 필요)
+# ---------------------------------------------------------------------------
+
+_JUDGE_SYSTEM_PROMPT = (
+    "당신은 RAG(검색 증강 생성) 시스템의 답변 품질을 평가하는 전문가입니다. "
+    "주어진 기준에 따라 1~5점 척도로 점수를 매기고, 반드시 JSON 형식으로만 응답하세요."
+)
+
+_JUDGE_USER_PROMPT = """\
+다음 항목을 평가하세요.
+
+**질문:** {question}
+
+**생성된 답변:** {answer}
+
+**참조 정답:** {reference}
+
+**검색된 컨텍스트:**
+{context}
+
+아래 기준에 따라 각 항목을 1~5점으로 평가하세요.
+- relevance   (관련성): 답변이 질문에 적절히 답하고 있는가?
+- faithfulness(충실성): 답변이 제공된 컨텍스트에 근거하고 있는가?
+- correctness (정확성): 답변이 참조 정답과 일치하는가?
+- completeness(완전성): 답변이 참조 정답의 핵심 정보를 모두 포함하는가?
+
+점수 기준: 1=매우나쁨, 2=나쁨, 3=보통, 4=좋음, 5=매우좋음
+
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
+{{"relevance": <1-5>, "faithfulness": <1-5>, "correctness": <1-5>, "completeness": <1-5>, "reason": "<한 문장 이유>"}}\
+"""
+
+_ALL_CRITERIA = ["relevance", "faithfulness", "correctness", "completeness"]
+
+
+def _parse_judge_response(text: str) -> dict:
+    """LLM 응답 텍스트에서 JSON을 파싱한다. 마크다운 코드블록도 처리."""
+    # 마크다운 코드블록 제거
+    text = re.sub(r"```(?:json)?", "", text).strip()
+    # 첫 번째 { ... } 블록 추출
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"JSON을 찾을 수 없음: {text!r}")
+    return json.loads(match.group())
+
+
+def _call_llm(llm, system: str, user: str) -> str:
+    """LangChain LLM 또는 OpenAI 클라이언트로 응답을 받아 문자열로 반환."""
+    # LangChain interface (invoke)
+    if hasattr(llm, "invoke"):
+        from langchain_core.messages import HumanMessage, SystemMessage
+        messages = [SystemMessage(content=system), HumanMessage(content=user)]
+        response = llm.invoke(messages)
+        return response.content if hasattr(response, "content") else str(response)
+
+    # OpenAI client (openai>=1.0)
+    if hasattr(llm, "chat"):
+        response = llm.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0,
+        )
+        return response.choices[0].message.content
+
+    raise TypeError(f"지원하지 않는 LLM 타입: {type(llm)}")
+
+
+def llm_judge_evaluate(
+    questions: List[str],
+    answers: List[str],
+    contexts: List[List[str]],
+    references: List[str],
+    llm=None,
+    criteria: Optional[List[str]] = None,
+) -> dict:
+    """
+    LLM-as-Judge 방식으로 생성 답변의 품질을 평가한다.
+
+    LLM이 각 답변을 직접 1~5점으로 채점하므로 어휘 기반 지표보다
+    의미론적 정확도를 더 잘 반영한다.
+
+    Args:
+        questions  : 질문 문자열 리스트
+        answers    : 생성된 답변 리스트
+        contexts   : 각 질문에 대해 검색된 청크 리스트의 리스트
+        references : 참조 정답 리스트
+        llm        : LangChain LLM 객체 또는 None.
+                     None 이면 OPENAI_API_KEY 환경변수로 gpt-4o-mini 자동 사용.
+                     예) from langchain_openai import ChatOpenAI
+                         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+                     예) from langchain_anthropic import ChatAnthropic
+                         llm = ChatAnthropic(model="claude-3-5-haiku-20241022", temperature=0)
+        criteria   : 집계에 포함할 기준 리스트. None 이면 4개 전체.
+                     ["relevance", "faithfulness", "correctness", "completeness"]
+
+    Returns:
+        {
+            "relevance":    float,      # 0.0 ~ 1.0 (1~5점 → /5 정규화)
+            "faithfulness": float,
+            "correctness":  float,
+            "completeness": float,
+            "judge_score":  float,      # criteria 지표들의 평균
+            "per_query":    List[dict]  # 질문별 원시 점수 및 이유
+        }
+
+    사용 예시:
+        import os
+        os.environ["OPENAI_API_KEY"] = "sk-..."
+
+        result = llm_judge_evaluate(
+            questions=["봉화군 재난통합관리시스템 예산은?"],
+            answers=["9억 원"],
+            contexts=[["봉화군 재난통합관리시스템 고도화 사업 예산: 900,000,000원 ..."]],
+            references=["900,000,000원"],
+        )
+        # {"relevance": 1.0, "faithfulness": 0.9, "correctness": 0.9, ...}
+    """
+    if criteria is None:
+        criteria = _ALL_CRITERIA
+
+    # llm 이 None 이면 OpenAI gpt-4o-mini 자동 생성
+    if llm is None:
+        try:
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        except ImportError:
+            raise ImportError(
+                "llm=None 으로 사용하려면 langchain-openai 와 OPENAI_API_KEY 가 필요합니다.\n"
+                "  pip install langchain-openai\n"
+                "  export OPENAI_API_KEY=sk-..."
+            )
+
+    per_query = []
+    accumulated: dict = {c: [] for c in criteria}
+
+    for q, a, ctx, ref in zip(questions, answers, contexts, references):
+        ctx_text = "\n---\n".join(ctx) if ctx else "(컨텍스트 없음)"
+        user_msg = _JUDGE_USER_PROMPT.format(
+            question=q,
+            answer=a,
+            reference=ref,
+            context=ctx_text,
+        )
+        try:
+            raw = _call_llm(llm, _JUDGE_SYSTEM_PROMPT, user_msg)
+            parsed = _parse_judge_response(raw)
+
+            row = {"question": q, "answer": a}
+            for c in _ALL_CRITERIA:
+                raw_score = parsed.get(c)
+                # 1~5 점수를 0~1로 정규화
+                score = (float(raw_score) - 1) / 4 if raw_score is not None else None
+                row[c] = score
+                if c in criteria and score is not None:
+                    accumulated[c].append(score)
+            row["reason"] = parsed.get("reason", "")
+            row["error"] = None
+        except Exception as e:
+            row = {
+                "question": q, "answer": a,
+                "relevance": None, "faithfulness": None,
+                "correctness": None, "completeness": None,
+                "reason": "", "error": str(e),
+            }
+
+        per_query.append(row)
+
+    # 집계
+    output: dict = {}
+    for c in _ALL_CRITERIA:
+        vals = accumulated.get(c, [])
+        output[c] = sum(vals) / len(vals) if vals else None
+
+    valid = [output[c] for c in criteria if output.get(c) is not None]
+    output["judge_score"] = sum(valid) / len(valid) if valid else None
+    output["per_query"] = per_query
 
     return output
