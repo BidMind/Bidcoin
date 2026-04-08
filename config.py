@@ -7,7 +7,7 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 # OpenAI API 키 설정
-os.environ["OPENAI_API_KEY"] = "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+os.environ["OPENAI_API_KEY"] = "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"
 
 # 입출력 파일 경로 설정
 CSV_PATH = os.path.join(ROOT_DIR, "processed_data.csv")
