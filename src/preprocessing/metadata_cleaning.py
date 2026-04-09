@@ -450,6 +450,9 @@ def process_metadata(
     print("(3-2) HWP 텍스트 재파싱")
     df = _reparse_hwp(df, files_dir)
 
+    # 저장
+    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
+    df.to_csv(output_csv_path, index=False, encoding="utf-8")
     print("=" * 60)
     print("process_metadata 완료")
     print(f"저장 완료: {output_csv_path}")
