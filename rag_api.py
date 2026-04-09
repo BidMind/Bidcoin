@@ -31,7 +31,7 @@ def get_rag_context(query: str, chat_history: list = []):
             print(f" 점수: {score:.2f} (기준: {SCORE_THRESHOLD})")
             print(f" 미리보기: {text_preview}")
             print("/n" + "-"*60)
-            break
+            continue
         # 파일명 추출
         source_file = doc.metadata.get("source", "unknown")
 
