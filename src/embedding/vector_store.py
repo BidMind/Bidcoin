@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import pandas as pd
 from langchain_community.vectorstores import FAISS
