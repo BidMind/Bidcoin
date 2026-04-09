@@ -412,27 +412,21 @@ def _reparse_hwp(df: pd.DataFrame, files_dir: str) -> pd.DataFrame:
 # ============================================================
 
 def process_metadata(
-    df: pd.DataFrame,
+    input_csv_path: str = "/home/bidcoin/data_list.csv",
     files_dir: str = "/home/shared/files",
+    output_csv_path: str = "/home/bidcoin/data_list_metadata.csv",
 ) -> pd.DataFrame:
     """
     메타데이터 정제 전체 파이프라인.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        data_list.csv를 읽어 들인 원본 데이터프레임.
-    files_dir : str
-        실제 HWP/PDF 파일이 있는 디렉터리 경로.
-        텍스트 재파싱이 필요 없으면 무시해도 무방하나,
-        파일이 존재해야 재파싱이 수행됩니다.
-
-    Returns
-    -------
-    pd.DataFrame
-        파일명/형식 수정 → 결측처리 → 텍스트 재파싱이 완료된 데이터프레임.
+    - 내부에서 CSV를 직접 읽음
+    - 처리 후 /home/bidcoin/data_list_metadata.csv 로 저장
     """
+    df = pd.read_csv(input_csv_path, encoding="utf-8")
     df = df.copy()
+
+    print("=" * 60)
+    print(f"원본 CSV 로드: {input_csv_path}")
+    print(f"행 개수: {len(df)}")
 
     # (1) 파일명 / 파일형식 수정
     print("=" * 60)
@@ -458,10 +452,14 @@ def process_metadata(
 
     print("=" * 60)
     print("process_metadata 완료")
+    print(f"저장 완료: {output_csv_path}")
     return df
 
-# main에서 메타데이터 로드 필요
+# main에서 메타데이터 로드 필요없어짐
 #ex.
 # df = pd.read_csv("data_list.csv", encoding="utf-8") 
 # df = process_metadata(df, files_dir="/home/shared/files")
 # df.to_csv("data_list_metadata.csv", index=False, encoding="utf-8")
+#수정후.
+# from preprocessing.metadata_cleaning import process_metadata
+# df = process_metadata()만 하면됨
