@@ -412,7 +412,7 @@ def _reparse_hwp(df: pd.DataFrame, files_dir: str) -> pd.DataFrame:
 # ============================================================
 
 def process_metadata(
-    input_csv_path: str = "/home/bidcoin/data_list.csv",
+    input_csv_path: str = "/home/shared/data_list.csv",
     files_dir: str = "/home/shared/files",
     output_csv_path: str = "/home/bidcoin/data_list_metadata.csv",
 ) -> pd.DataFrame:
@@ -457,6 +457,9 @@ def process_metadata(
     print("process_metadata 완료")
     print(f"저장 완료: {output_csv_path}")
     return df
+
+if __name__ == "__main__":
+    process_metadata()
 
 # main에서 메타데이터 로드 필요없어짐
 #ex.
