@@ -32,11 +32,9 @@ import pandas as pd
 
 def parse_hwp(file_path: str) -> str:
     """
-    HWP 파일에서 raw_text를 추출한다.
-
-    - 구조 추출·표 추출 없이 rec_type == 67 텍스트 레코드만 사용
-    - zlib 압축 해제 포함
-    - 파싱 실패 시 빈 문자열 반환
+    HWP 파일에서 raw_text만 추출
+    - 구조추출/표추출 없음
+    - rec_type == 67 텍스트 레코드만 사용
     """
     section_texts = []
 
@@ -49,10 +47,11 @@ def parse_hwp(file_path: str) -> str:
             while ole.exists(f"BodyText/Section{section_idx}"):
                 data = ole.openstream(f"BodyText/Section{section_idx}").read()
 
+                # 압축 해제 시도
                 try:
                     data = zlib.decompress(data, -15)
                 except zlib.error:
-                    pass  # 압축 안 된 경우 그대로 사용
+                    pass
 
                 chars = []
                 i = 0
@@ -61,33 +60,49 @@ def parse_hwp(file_path: str) -> str:
                     if i + 4 > len(data):
                         break
 
-                    header = int.from_bytes(data[i:i + 4], "little")
+                    header = int.from_bytes(data[i:i+4], "little")
                     rec_type = header & 0x3FF
                     rec_len = (header >> 20) & 0xFFF
                     i += 4
 
+                    # 확장 길이 처리
                     if rec_len == 0xFFF:
                         if i + 4 > len(data):
                             break
-                        rec_len = int.from_bytes(data[i:i + 4], "little")
+                        rec_len = int.from_bytes(data[i:i+4], "little")
                         i += 4
 
+                    # body 범위 체크
                     if i + rec_len > len(data):
                         break
 
-                    body = data[i:i + rec_len]
+                    body = data[i:i+rec_len]
                     i += rec_len
 
+                    # 본문 텍스트 레코드만 추출
                     if rec_type == 67:
-                        for j in range(0, len(body) - 1, 2):
-                            ch = int.from_bytes(body[j:j + 2], "little")
-                            if ch in (0x0D, 0x0A, 10, 13, 0):
+                        offset = 0
+                        while offset + 2 <= len(body):
+                            ch = int.from_bytes(body[offset:offset+2], "little")
+                            offset += 2
+
+                            if ch == 0x0000:
+                                # null 문자 무시
+                                continue
+                            elif ch in (0x000D, 0x000A):
+                                # 줄바꿈
                                 chars.append("\n")
-                            elif 0x20 <= ch <= 0xD7A3 or ch > 0xE000:
-                                try:
-                                    chars.append(chr(ch))
-                                except ValueError:
-                                    pass
+                            elif ch < 0x0020:
+                                # 인라인 오브젝트 제어코드 (그림/표/수식 등)
+                                # 뒤따라오는 12바이트 파라미터 스킵
+                                offset += 12
+                            elif 0x0020 <= ch <= 0xD7A3:
+                                # 기본 다국어 평면 (한글 포함)
+                                chars.append(chr(ch))
+                            elif 0xE000 <= ch <= 0xFFFF:
+                                # 사용자 정의 영역
+                                chars.append(chr(ch))
+                            # 0xD800~0xDFFF 서로게이트 영역은 무시
 
                 section_text = "".join(chars).strip()
                 if section_text:
@@ -159,13 +174,13 @@ def parse_single_hwp_raw(file_path: str) -> dict:
 # (3) HWP 텍스트 정제
 # ---------------------------------------------------------------------------
 
-def clean_hwp_text(text) -> str:
+def clean_hwp_text(text):
     """
-    HWP raw_text에 보수적 공통 정제를 적용한다.
+    raw_text 기준 보수적 공통 정제
 
-    원칙:
+    원칙
     - 사업명, 예산, 기간, URL, 이메일, 요구사항 코드는 보존
-    - 줄 단위 반복 노이즈 + 문장 중간 한자형 노이즈 제거
+    - 제어문자, 줄바꿈, 연속 기호 등 범용 노이즈만 정제
     - 제목형 띄어쓰기만 제한적으로 복원
     - 숫자/표/항목 구조는 최대한 유지
     """
@@ -176,16 +191,18 @@ def clean_hwp_text(text) -> str:
     if not text.strip():
         return text
 
+    # --------------------------------------------------------------------------
     # 패턴 정의
+    # --------------------------------------------------------------------------
     protected_line_pattern = re.compile(
         r"("
-        r"(?:https?://|www\.)\S+"
-        r"|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-        r"|(?:TEL|FAX|전화|팩스)\s*[:：]?\s*\+?\d{1,4}[-)\s]?\d{2,4}-\d{3,4}"
-        r"|\b[A-Z]{2,5}\s*-\s*\d{2,4}\b"
-        r"|(?:[A-Za-z]:)?[\\/][^\s]+"
+        r"(?:https?://|www\.)\S+"                                            # URL
+        r"|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"                   # email
+        r"|(?:TEL|FAX|전화|팩스)\s*[:：]?\s*\+?\d{1,4}[-)\s]?\d{2,4}-\d{3,4}" # 연락처
+        r"|\b[A-Z]{2,5}\s*-\s*\d{2,4}\b"                                     # CNR-001, PMR-002
+        r"|(?:[A-Za-z]:)?[\\/][^\s]+"                                        # 경로 비슷한 값
         r")",
-        re.IGNORECASE,
+        re.IGNORECASE
     )
 
     protected_token_pattern = re.compile(
@@ -197,34 +214,21 @@ def clean_hwp_text(text) -> str:
         r"|^[A-Z]{2,5}\s*-\s*\d{2,4}$"
         r"|^(?:[A-Za-z]:)?[\\/].+$"
         r")",
-        re.IGNORECASE,
+        re.IGNORECASE
     )
 
-    noise_line_pattern = re.compile(
-        r"^\s*(?:"
-        r"[氠瑢汤捯桤灧湯湷湰灧漠杳捤獥]+"
-        r"|[Āࢀ]+"
-        r"|[汫╨]+"
-        r"|(?:[^\w가-힣]{1,5})"
-        r")\s*$"
-    )
-
-    cjk_noise_token_pattern = re.compile(r"^[\u4E00-\u9FFF]{2,6}$")
-    cjk_noise_line_pattern = re.compile(r"^\s*(?:[\u4E00-\u9FFF]{2,6}\s*){1,20}$")
-
-    explicit_noise_token_pattern = re.compile(
-        r"^(?:氠瑢|汤捯|桤灧|湯湷|湰灧|漠杳|捤獥|Ā|ࢀ|汫╨)$"
-    )
-
-    inline_noise_pattern = re.compile(
-        r"(?:氠瑢|汤捯|桤灧|湯湷|湰灧|漠杳|捤獥|Ā|ࢀ|汫╨)"
+    # 줄 전체가 기호/공백만으로 구성된 노이즈 줄
+    symbol_noise_line_pattern = re.compile(
+        r"^\s*[^\w가-힣A-Za-z0-9]{1,10}\s*$"
     )
 
     spaced_ko_title_pattern = re.compile(
         r"(?<![가-힣A-Za-z0-9])(?:[가-힣]\s){1,20}[가-힣](?![가-힣A-Za-z0-9])"
     )
 
+    # --------------------------------------------------------------------------
     # 0) 유니코드 정규화
+    # --------------------------------------------------------------------------
     text = unicodedata.normalize("NFKC", text)
 
     # 1) 줄바꿈/탭 정리
@@ -236,8 +240,11 @@ def clean_hwp_text(text) -> str:
     # 3) 자주 보이는 특수 깨짐 문자 제거
     text = re.sub(r"[↸ᬄὩ⇟]", " ", text)
 
+    # --------------------------------------------------------------------------
     # 4) 줄 단위 처리
+    # --------------------------------------------------------------------------
     cleaned_lines = []
+
     for raw_line in text.split("\n"):
         line = raw_line.strip()
 
@@ -245,33 +252,33 @@ def clean_hwp_text(text) -> str:
             cleaned_lines.append("")
             continue
 
+        # 보호 줄은 거의 그대로 둠
         if protected_line_pattern.search(line):
             line = re.sub(r"[ ]{2,}", " ", line).strip()
             cleaned_lines.append(line)
             continue
 
-        if noise_line_pattern.fullmatch(line):
+        # 줄 전체가 노이즈면 제거
+        if symbol_noise_line_pattern.fullmatch(line):
             continue
 
-        if cjk_noise_line_pattern.fullmatch(line):
-            continue
-
-        line = inline_noise_pattern.sub(" ", line)
-
+        # 토큰 단위 노이즈 제거
         tokens = line.split()
         kept_tokens = []
+
         for tok in tokens:
             if protected_token_pattern.search(tok):
                 kept_tokens.append(tok)
                 continue
-            if explicit_noise_token_pattern.fullmatch(tok):
-                continue
-            if cjk_noise_token_pattern.fullmatch(tok):
-                continue
+
             kept_tokens.append(tok)
 
         line = " ".join(kept_tokens)
+
+        # 연속 기호 노이즈 축소
         line = re.sub(r"(?:[‧·•∙]{3,})", " ", line)
+
+        # 공백 정리
         line = re.sub(r"[ ]{2,}", " ", line).strip()
 
         if not line:
@@ -281,10 +288,13 @@ def clean_hwp_text(text) -> str:
 
     text = "\n".join(cleaned_lines)
 
+    # --------------------------------------------------------------------------
     # 5) 제목형 띄어쓰기 복원
+    # --------------------------------------------------------------------------
     def restore_spaced_title(match):
         s = match.group(0)
         compact = s.replace(" ", "")
+
         if not (2 <= len(compact) <= 25):
             return s
         if re.search(r"(https?|www\.|@|\d{2,4}-\d{2,4}-\d{3,4})", s, re.I):
@@ -293,11 +303,14 @@ def clean_hwp_text(text) -> str:
             return s
         if re.fullmatch(r"(?:[가-힣]\s){1,20}[가-힣]", s.strip()):
             return compact
+
         return s
 
     text = spaced_ko_title_pattern.sub(restore_spaced_title, text)
 
+    # --------------------------------------------------------------------------
     # 6) 자주 나오는 표제어 보정
+    # --------------------------------------------------------------------------
     replacements = {
         "제안요청서": "제안요청서",
         "목차": "목차",
@@ -309,17 +322,22 @@ def clean_hwp_text(text) -> str:
         "제안요청사항": "제안요청 사항",
         "사업개요": "사업개요",
     }
+
     for k, v in replacements.items():
         text = re.sub(rf"\b{k}\b", v, text)
 
+    # --------------------------------------------------------------------------
     # 7) 목차 줄 끝 페이지 번호 제거
+    # --------------------------------------------------------------------------
     final_lines = []
     for line in text.split("\n"):
         if protected_line_pattern.search(line):
             final_lines.append(line)
             continue
+
         line = re.sub(r"(\s*[-·•‧∙]\s*\d{1,3})$", "", line).rstrip()
         final_lines.append(line)
+
     text = "\n".join(final_lines)
 
     # 8) 빈 줄 과다 축소
