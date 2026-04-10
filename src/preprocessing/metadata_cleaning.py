@@ -34,6 +34,7 @@ from config import DATABASE_DIR, OUTPUT_DIR
 ROOT_DIR = Path(__file__).resolve().parent  
 load_dotenv(ROOT_DIR / ".env")
 
+fitz.TOOLS.mupdf_display_errors(False)
 # ============================================================
 # (1) 파일명 / 파일형식 수정
 # ============================================================
