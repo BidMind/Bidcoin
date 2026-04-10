@@ -8,7 +8,7 @@ preprocessing/metadata_cleaning.py
 
 사용 예시
 ---------
-from preprocessing.metadata_cleaning import process_metadata
+from src.preprocessing.metadata_cleaning import process_metadata
 
 df = pd.read_csv("data_list.csv", encoding="utf-8")
 df = process_metadata(df, files_dir="/home/shared/files")
