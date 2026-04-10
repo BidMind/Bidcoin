@@ -21,8 +21,8 @@ from typing import Optional
 
 import pandas as pd
 
-from parsing.pdf_parser import parse_pdf_folder
-from parsing.hwp_parser import parse_hwp_folder_raw
+from src.parsing.pdf_parser import parse_pdf_folder
+from src.parsing.hwp_parser import parse_hwp_folder_raw
 
 
 # ---------------------------------------------------------------------------
