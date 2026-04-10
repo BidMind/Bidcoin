@@ -1,4 +1,4 @@
-# src/ingestion/chunking.py
+# src/ingestion/chunker.py
 
 from __future__ import annotations
 

@@ -25,12 +25,12 @@ def get_rag_context(query: str, chat_history: list = []):
             source_file = doc.metadata.get("source", "unknown")
             
             text_preview = doc.page_content[:100].replace("\n", " ") + "..."  # 간단한 텍스트 미리보기
-            print("/n" + "-"*60)
+            print("\n" + "-"*60)
             print(f" [Debug] 문서 필터링 됨 (커트라인 미달)")
             print(f" 출처: {source_file}")
             print(f" 점수: {score:.2f} (기준: {SCORE_THRESHOLD})")
             print(f" 미리보기: {text_preview}")
-            print("/n" + "-"*60)
+            print("\n" + "-"*60)
             continue
         # 파일명 추출
         source_file = doc.metadata.get("source", "unknown")
