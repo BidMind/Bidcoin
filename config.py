@@ -1,18 +1,32 @@
 import os
-import sys
+from pathlib import Path
+from dotenv import load_dotenv
 
-# 현재 파일이 있는 최상단 폴더를 파이썬 경로에 강제 추가, import 오류 방지
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
+ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
 
-# OpenAI API 키 설정
-os.environ["OPENAI_API_KEY"] = "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # 실제 키로 교체 필요
+APP_ENV = os.getenv("APP_ENV", "development")
+PORT = int(os.getenv("PORT", "8000"))
 
-# 입출력 파일 경로 설정
-CSV_PATH = os.path.join(ROOT_DIR, "processed_data.csv")
-FAISS_INDEX_DIR = os.path.join(ROOT_DIR, "faiss_index")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 모델 이름 설정
-EMBED_MODEL = "text-embedding-3-small"    
-RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
+DATABASE_DIR = Path(os.getenv("DATABASE_DIR", str(ROOT_DIR / "data")))
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(ROOT_DIR / "output")))
+
+CSV_PATH = ROOT_DIR / "processed_data.csv"
+FAISS_INDEX_DIR = ROOT_DIR / "faiss_index"
+
+EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
+RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Missing required environment variable: {name}")
+    return value
+
+
+OPENAI_API_KEY = require_env("OPENAI_API_KEY")
