@@ -1,0 +1,43 @@
+# Retrieval → Generation 입력 포맷
+
+!기대!하는 입력 형식
+
+## 필수 필드
+
+- `question`: 사용자 질문
+- `contexts`: retrieval로 선택된 청크 목록
+- `chat_history`: 최근 대화 3턴 이내
+
+## contexts 내부 필드
+
+- `text` (필수): 청크 본문
+- `source_file` (필수): 출처 파일명
+--------------------------------------------
+- `organization` (권장): 발주기관
+- `project_name` (권장): 사업명
+- `summary` (권장): 문서 요약
+- `score` (권장): retrieval 점수
+- `chunk_id` (권장): 청크 식별자
+
+## 예시
+
+```json *json 필요
+{
+  "question": "고려대학교 차세대 포털 시스템 사업이랑 광주과학기술원 학사 시스템 기능개선 사업을 비교해 줘.",
+  "contexts": [
+    {
+      "chunk_id": "korea_u_05", *uuid 필요
+      "text": "차세대 포털 시스템은 ...",
+      "source_file": "고려대학교_차세대포털.hwp",
+      "organization": "고려대학교",
+      "project_name": "차세대 포털 시스템 구축",
+      "summary": "포털과 학사 정보시스템을 통합 고도화하는 사업",
+      "score": 0.88
+    }
+  ],
+  "chat_history": []
+}
+```
+
+
+
