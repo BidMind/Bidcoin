@@ -7,6 +7,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import config
 from src.preprocessing.metadata_cleaning import process_metadata
 
+from pathlib import Path
+from dotenv import load_dotenv
+from config import DATABASE_DIR, OUTPUT_DIR
+
+ROOT_DIR = Path(__file__).resolve().parent  
+load_dotenv(ROOT_DIR / ".env")
+
 
 # ============================================================
 # 청크 크기 결정 (clean_text 길이 기준)
@@ -153,8 +160,8 @@ def process_chunking(
     return chunked_df
 
 if __name__ == "__main__":
-    df_parsed = pd.read_csv("/home/bidcoin/df_parsed.csv", encoding="utf-8")
-    df_meta = process_metadata(files_dir="/home/shared/files")
+    df_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed.csv", encoding="utf-8")
+    df_meta = process_metadata(files_dir= DATABASE_DIR / "files")
     process_chunking(df_parsed, df_meta)
 
 # main에서 아래 코드 필요

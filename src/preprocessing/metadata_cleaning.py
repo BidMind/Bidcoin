@@ -26,6 +26,12 @@ import pandas as pd
 import fitz          # pymupdf
 import olefile
 
+from pathlib import Path
+from dotenv import load_dotenv
+from config import DATABASE_DIR, OUTPUT_DIR
+
+ROOT_DIR = Path(__file__).resolve().parent  
+load_dotenv(ROOT_DIR / ".env")
 
 # ============================================================
 # (1) 파일명 / 파일형식 수정
@@ -412,10 +418,12 @@ def _reparse_hwp(df: pd.DataFrame, files_dir: str) -> pd.DataFrame:
 # ============================================================
 
 def process_metadata(
-    input_csv_path: str = "/home/shared/data_list.csv",
-    files_dir: str = "/home/shared/files",
-    output_csv_path: str = "/home/bidcoin/data_list_metadata.csv",
+    input_csv_path: Path = DATABASE_DIR / "data_list.csv",
+    files_dir: Path = DATABASE_DIR / "files",
+    output_csv_path: Path = OUTPUT_DIR / "data_list_metadata.csv",
 ) -> pd.DataFrame:
+    output_csv_path = Path(output_csv_path)
+    output_csv_path.parent.mkdir(parents=True, exist_ok=True)
     """
     메타데이터 정제 전체 파이프라인.
     - 내부에서 CSV를 직접 읽음
