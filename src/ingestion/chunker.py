@@ -5,11 +5,10 @@ from __future__ import annotations
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import config
-from src.preprocessing.metadata_cleaning import process_metadata
 
 from pathlib import Path
 from dotenv import load_dotenv
-from config import DATABASE_DIR, OUTPUT_DIR
+from config import OUTPUT_DIR
 
 ROOT_DIR = Path(__file__).resolve().parent  
 load_dotenv(ROOT_DIR / ".env")
@@ -65,11 +64,14 @@ def _build_content_prefix(row: pd.Series) -> str:
 # 행 단위 청킹 (청킹 대상: clean_text)
 # ============================================================
 
-def _chunk_row(row: pd.Series) -> list[dict]:
+def _chunk_row(row: pd.Series, use_meta_prefix: bool = True) -> list[dict]:
     """
     단일 행의 clean_text를 청킹.
+    use_meta_prefix : bool
+        True  → content = [발주기관|사업명] + 본문청크
+        False → content = 본문청크만
     반환값: 청크별 dict 리스트.
-      - content     : [핵심메타]\n\n{본문청크}  (임베딩 대상)
+      - content     : (핵심메타 +) 본문청크  (임베딩 대상)
       - body_length : 본문 청크 길이 (헤더 제외, 청킹 품질 확인용)
       - chunk_index : 0-based 청크 순서
       - total_chunks: 해당 문서의 전체 청크 수
@@ -82,19 +84,23 @@ def _chunk_row(row: pd.Series) -> list[dict]:
     splitter = _get_splitter(len(clean_text))  # clean_text 길이 기준
     chunks = splitter.split_text(clean_text)
 
-    prefix = _build_content_prefix(row)
     total = len(chunks)
-
+ 
+    if use_meta_prefix:
+        prefix = _build_content_prefix(row)
+        contents = [f"{prefix}\n\n{chunk}" for chunk in chunks]
+    else:
+        contents = chunks
+ 
     return [
         {
-            "content": f"{prefix}\n\n{chunk}",
+            "content": content,
             "body_length": len(chunk),
             "chunk_index": i,
             "total_chunks": total,
         }
-        for i, chunk in enumerate(chunks)
+        for i, (chunk, content) in enumerate(zip(chunks, contents))
     ]
-
 
 # ============================================================
 # 메인 함수
@@ -106,6 +112,7 @@ META_COLS = ["공고 번호", "공고 차수", "발주 기관", "사업명", "�
 def process_chunking(
     df_parsed: pd.DataFrame,
     df_meta: pd.DataFrame,
+    use_meta_prefix: bool = True,
 ) -> pd.DataFrame:
     """
     파싱된 RFP 텍스트를 청킹하고 메타데이터를 병합.
@@ -116,6 +123,9 @@ def process_chunking(
         df_parsed.csv 로드한 것. 컬럼: 파일명, 파일형식, raw_text, clean_text
     df_meta : pd.DataFrame
         data_list_metadata.csv 로드한 것. 파일명 기준으로 join.
+    use_meta_prefix : bool
+        True  → 각 청크 content 앞에 [발주기관|사업명] 헤더 부착
+        False → 본문 청크만 저장
  
     Returns
     -------
@@ -129,14 +139,14 @@ def process_chunking(
           공고 번호 / 공고 차수 / 발주 기관 / 사업명 /
           사업 금액 / 입찰 참여 시작일 / 입찰 참여 마감일  : 별도 메타 컬럼
     """
-    print("청킹 시작...")
+    print(f"청킹 시작...")
 
     # df_meta에서 필요한 컬럼만 골라 merge
     meta_cols_for_merge = ["파일명"] + [c for c in META_COLS if c in df_meta.columns]
     df = df_parsed.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
  
     # 청킹: 각 행 → dict 리스트
-    df["_chunks"] = df.apply(_chunk_row, axis=1)
+    df["_chunks"] = df.apply(lambda row: _chunk_row(row, use_meta_prefix), axis=1)
  
     chunked_df = df.explode("_chunks").reset_index(drop=True)
  
@@ -155,25 +165,19 @@ def process_chunking(
     # config.CSV_PATH에 저장
     chunked_df.to_csv(config.CSV_PATH, index=False, encoding="utf-8")
     print(f"청킹 완료: 원본 {len(df_parsed)}건 → {len(chunked_df)}개 청크")
-    print(f"저장 완료: {config.CSV_PATH}")
+    print(f"저장 완료: OUTPUT_DIR/{Path(config.CSV_PATH).name}")
  
     return chunked_df
 
+
+# 작업파일 단독실행용
 if __name__ == "__main__":
+    CHUNK_OPTION = False
+    print(f"\n--- chunker 실행(meta_prefix: {CHUNK_OPTION}) ---")
     df_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed.csv", encoding="utf-8")
-    df_meta = process_metadata(files_dir= DATABASE_DIR / "files")
-    process_chunking(df_parsed, df_meta)
-
-# main에서 아래 코드 필요
-# ex.
-
-# 1)파싱데이터
-# df_parsed = pd.read_csv("/home/bidcoin/df_parsed.csv", encoding="utf-8") 
-
-# 2)메타데이터
-# - 모듈내부에서 /home/shared/data_list.csv 를 불러옴
-# - 메타데이터 처리 후 /home/bidcoin/data_list_metadata.csv 로 저장
-# df_meta = process_metadata()
-
-# 3)청킹데이터
-# process_chunking(df_parsed, df_meta)  <- 저장까지 내부에서 처리
+    df_meta   = pd.read_csv(OUTPUT_DIR / "data_list_metadata.csv", encoding="utf-8")
+    if CHUNK_OPTION:
+        print("핵심 메타를 청크에 부착합니다")
+    else:
+        print("핵심 메타 부착을 건너뜁니다")
+    process_chunking(df_parsed, df_meta, use_meta_prefix=CHUNK_OPTION)

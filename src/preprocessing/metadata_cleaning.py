@@ -477,14 +477,4 @@ if __name__ == "__main__":
  
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)  
     df_meta.to_csv(output_csv_path, index=False, encoding="utf-8")  # 저장
-    print(f"저장 완료: {output_csv_path}")
-
-
-# ----- main.py 에 필요한 코드 -----
-# from src.pipeline.rag_pipeline import meta_pipeline
-
-# if __name__ == "__main__":
-#     OPTION = True  # 옵션값을 여기서 조절
-#     meta_pipeline(use_cleaning=OPTION)  # 메타데이터저장로직 없어도 됨
-
-
+    print(f"저장 완료: OUTPUT_DIR/{output_csv_path.name}\n")
