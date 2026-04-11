@@ -12,7 +12,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 
 # 메타데이터 정제 옵션
-def meta_pipeline(use_cleaning=True):
+def meta_pipeline(df: pd.DataFrame, use_cleaning=True) -> pd.DataFrame:
     print(f"\n--- start meta pipeline (cleaning: {use_cleaning}) ---")
 
     input_csv_path = DATABASE_DIR / "data_list.csv"
@@ -21,7 +21,6 @@ def meta_pipeline(use_cleaning=True):
     
     # 1. 메타데이터 처리 단계(옵션이 True일 때만 정제 모듈 실행)
     if use_cleaning:  
-        df = pd.read_csv(input_csv_path, encoding="utf-8")  # 메타데이터 불러오기
         df_meta = process_metadata(df, files_dir=str(files_dir))  # 정제모듈 호출
         df_meta.to_csv(output_csv_path, index=False, encoding="utf-8")  # 메타데이터 저장
         print("메타데이터 정제 완료")
@@ -29,6 +28,7 @@ def meta_pipeline(use_cleaning=True):
 
     else:
         print("메타데이터 정제를 건너뜁니다")
+        df_meta = df.copy()
         df_meta = pd.read_csv(input_csv_path, encoding="utf-8")
         print(f"사용 파일: DATABASE_DIR/{input_csv_path.name}\n")
     
@@ -67,15 +67,17 @@ def chunk_pipeline(df_parsed: pd.DataFrame, df_meta: pd.DataFrame, use_meta_pref
 
 # 작업파일 단독실행용 (여기서 T/F 파라미터 바꿔보기)
 if __name__ == "__main__":
-    df_meta = meta_pipeline(use_cleaning=False)
+    df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")
+    df_meta = meta_pipeline(df, use_cleaning=False)
     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)
     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=True)
 
 # run_pipe 작성 방법 <-run_pipe는 현수님이 만든 모듈 임의명칭
 # def run_pipe(use_cleaning: bool = True, use_meta_prefix: bool = True):
-#     df_meta = meta_pipeline(use_cleaning=use_cleaning)   # 1. 메타데이터 정제
-#     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)  # 2.df_parsed.csv생성
-#     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=use_meta_prefix)  # 3. 청킹
+#     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")  # 1. 불러오기
+#     df_meta = meta_pipeline(use_cleaning=use_cleaning)   # 2. 메타데이터 정제
+#     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)  # 3.df_parsed.csv생성
+#     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=use_meta_prefix)  # 4. 청킹
 #     return df_chunked
 
 # ----- main.py 에 필요한 코드 -----

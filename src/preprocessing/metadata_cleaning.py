@@ -476,4 +476,4 @@ if __name__ == "__main__":
  
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)  
     df_meta.to_csv(output_csv_path, index=False, encoding="utf-8")  # 저장
-    print(f"저장 완료: {output_csv_path}")
+    print(f"저장 완료: OUTPUT_DIR/{output_csv_path.name}\n")

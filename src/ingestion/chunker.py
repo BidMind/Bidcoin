@@ -172,15 +172,12 @@ def process_chunking(
 
 # 작업파일 단독실행용
 if __name__ == "__main__":
+    CHUNK_OPTION = False
+    print(f"\n--- chunker 실행(meta_prefix: {CHUNK_OPTION}) ---")
     df_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed.csv", encoding="utf-8")
     df_meta   = pd.read_csv(OUTPUT_DIR / "data_list_metadata.csv", encoding="utf-8")
-    process_chunking(df_parsed, df_meta)
-
-
-# ----- main.py 에 필요한 코드 -----
-# from src.pipeline.rag_pipeline import run_pipe <-run_pipe는 현수님이 만든 모듈 임의명칭
-
-# if __name__ == "__main__":
-#     META_OPTION = True  # 옵션값을 여기서 조절
-#     CHUNK_OPTION = True
-#     run_pipe(use_cleaning=META_OPTION, use_meta_prefix=CHUNK_OPTION)
+    if CHUNK_OPTION:
+        print("핵심 메타를 청크에 부착합니다")
+    else:
+        print("핵심 메타 부착을 건너뜁니다")
+    process_chunking(df_parsed, df_meta, use_meta_prefix=CHUNK_OPTION)
