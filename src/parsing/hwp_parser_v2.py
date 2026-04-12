@@ -80,8 +80,15 @@ def is_probable_heading(line: str) -> bool:
     if not line:
         return False
     line = line.strip()
-    if len(line) > 120:
+    if len(line) > 150:
         return False
+
+    # 날짜 패턴 제외 (예: 2024. 03. / 2024.03.15)
+    if re.match(r"^\d{4}\.\s*\d{1,2}\.?$", line):
+        return False
+    if re.match(r"^\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?$", line):
+        return False
+    
     heading_patterns = [
         r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.\)]?\s*.+",
         r"^\d+[.\)]\s*.+",
@@ -343,10 +350,11 @@ def parse_html_to_structured(
             content = "\n".join(
                 [c for c in current_content if str(c).strip()]
             ).strip()
-            sections.append({
-                "section_title": current_title,
-                "content": content,
-            })
+            if content:  # content 있을 때만 저장
+                sections.append({
+                    "section_title": current_title,
+                    "content": content,
+                })
         current_title = None
         current_content = []
 
@@ -363,6 +371,11 @@ def parse_html_to_structured(
             # 표 내부 텍스트 중복 수집 방지
             if el.find_parent("table") is not None:
                 continue
+
+            # div는 중첩 요소(p, table, div) 있으면 컨테이너로 간주하고 건너뜀
+            if tag == "div" and el.find(["p", "table", "div"]):
+                continue
+            
             txt = normalize_whitespace(el.get_text(" ", strip=True))
             if not txt:
                 continue
@@ -400,7 +413,6 @@ def parse_html_to_structured(
                 "raw_rows": rows,
                 "markdown": markdown,
             })
-            current_content.append(markdown)
             structured_lines.append(f"### 표 {table_seq}")
             structured_lines.append(markdown)
             table_seq += 1
@@ -869,7 +881,7 @@ def parse_single_hwp_document(file_path: str, timeout: int = 1800) -> Dict[str, 
     raw_text = normalize_whitespace(raw_text_original)
 
     # 구조 추출 (HTML 우선 → fallback)
-    structured_result = parse_hwp_structured(file_path, raw_text=raw_text_original, timeout=timeout)  # timeout 전달
+    structured_result = parse_hwp_structured(file_path, raw_text=raw_text, timeout=timeout)  # timeout 전달
     structured_text = normalize_whitespace(structured_result.get("structured_text", ""))
     sections = structured_result.get("sections", [])
     tables = structured_result.get("tables", [])
@@ -954,6 +966,8 @@ def _make_error_row(
         "sections_json": None,
         "tables_json": None,
         "parse_method": status,
+        "html_top_tags": None,       
+        "html_selected_tags": None,  
         "raw_parse_success": False,
         "html_parse_success": False,
         "struct_parse_success": False,

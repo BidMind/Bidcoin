@@ -15,7 +15,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DATABASE_DIR = Path(os.getenv("DATABASE_DIR", str(ROOT_DIR / "data")))
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(ROOT_DIR / "output")))
 
-CSV_PATH = ROOT_DIR / "processed_data.csv"
+CSV_PATH = ROOT_DIR / "processed_data.csv"  # 파싱v1
+CSV_PATH_V2 = ROOT_DIR / "processed_data_v2.csv"  # 파싱v2
+
 FAISS_INDEX_DIR = ROOT_DIR / "faiss_index"
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
