@@ -16,7 +16,8 @@ DATABASE_DIR = Path(os.getenv("DATABASE_DIR", str(ROOT_DIR / "data")))
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", str(ROOT_DIR / "output")))
 
 CSV_PATH = ROOT_DIR / "processed_data.csv"  # 파싱v1
-CSV_PATH_V2 = ROOT_DIR / "processed_data_v2.csv"  # 파싱v2
+PKL_PATH_V21 = ROOT_DIR / "processed_data_v21.pkl"  # 파싱v2(표 포함)
+PKL_PATH_V22 = ROOT_DIR / "processed_data_v22.pkl"  # 파싱v2(표 미포함)
 
 FAISS_INDEX_DIR = ROOT_DIR / "faiss_index"
 

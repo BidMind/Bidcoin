@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import json
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -101,8 +102,8 @@ def _parse_json_col(val) -> list:
 # PDF 청킹 (기존 방식 유지)
 # ============================================================
 
-def _chunk_pdf_row(row: pd.Series, use_meta_prefix: bool = True) -> list[dict]:
-    """PDF 단일 행 clean_text 청킹."""
+def _chunk_pdf_row(row: pd.Series) -> list[dict]:
+    """PDF 단일 행 clean_text 청킹 - 순수 본문 청크만 생성"""
     clean_text = row.get("clean_text", "")
     try:
         if not clean_text or not str(clean_text).strip():
@@ -115,21 +116,15 @@ def _chunk_pdf_row(row: pd.Series, use_meta_prefix: bool = True) -> list[dict]:
     chunks = splitter.split_text(clean_text)
     total = len(chunks)
 
-    if use_meta_prefix:
-        prefix = _build_content_prefix(row)
-        contents = [f"{prefix}\n\n{chunk}" for chunk in chunks]
-    else:
-        contents = chunks
-
     return [
         {
-            "content": content,
+            "content": chunk,
             "body_length": len(chunk),
             "chunk_index": i,
             "total_chunks": total,
             "chunk_type": "text",
         }
-        for i, (chunk, content) in enumerate(zip(chunks, contents))
+        for i, chunk in enumerate(chunks)
     ]
 
 
@@ -137,10 +132,10 @@ def _chunk_pdf_row(row: pd.Series, use_meta_prefix: bool = True) -> list[dict]:
 # HWP 구조형 청킹
 # ============================================================
 
-def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables: bool = True,
+def _chunk_hwp_row(row: pd.Series, include_tables: bool = True,
     ) -> list[dict]:
     """
-    HWP 단일 행 구조형 청킹.
+    HWP 단일 행 구조형 청킹 - 순수 본문 청크만 생성
 
     우선순위
     --------
@@ -149,15 +144,12 @@ def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables:
 
     include_tables : True면 표 단위 청크 추가, False면 표 청킹 생략
     """
-    prefix = _build_content_prefix(row) if use_meta_prefix else ""
     chunks: list[dict] = []
 
     sections = _parse_json_col(row.get("sections"))
     tables   = _parse_json_col(row.get("tables")) if include_tables else []
 
-    # ------------------------------------------------------------------
     # 1) 섹션 단위 청킹
-    # ------------------------------------------------------------------
     if sections:
         section_chunks: list[str] = []
 
@@ -175,18 +167,15 @@ def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables:
 
         total = len(section_chunks)
         for i, chunk in enumerate(section_chunks):
-            content = f"{prefix}\n\n{chunk}" if prefix else chunk
             chunks.append({
-                "content": content,
+                "content": chunk,      # 메타 없는 순수 본문
                 "body_length": len(chunk),
                 "chunk_index": i,
                 "total_chunks": total,
                 "chunk_type": "section",
             })
 
-    # ------------------------------------------------------------------
     # 2) sections 없으면 clean_text fallback
-    # ------------------------------------------------------------------
     else:
         clean_text = str(row.get("clean_text") or "").strip()
         if clean_text:
@@ -194,18 +183,15 @@ def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables:
             text_chunks = splitter.split_text(clean_text)
             total = len(text_chunks)
             for i, chunk in enumerate(text_chunks):
-                content = f"{prefix}\n\n{chunk}" if prefix else chunk
                 chunks.append({
-                    "content": content,
+                    "content": chunk,  # 메타 없는 순수 본문
                     "body_length": len(chunk),
                     "chunk_index": i,
                     "total_chunks": total,
                     "chunk_type": "text",
                 })
 
-    # ------------------------------------------------------------------
     # 3) 표 단위 청크
-    # ------------------------------------------------------------------
     for t in tables:
         markdown = t.get("markdown") or ""
         if not markdown.strip():
@@ -218,9 +204,8 @@ def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables:
         table_chunks = splitter.split_text(table_text)
 
         for sub in table_chunks:
-            content = f"{prefix}\n\n{sub}" if prefix else sub
             chunks.append({
-                "content": content,
+                "content": sub,        # 메타 없는 순수 본문
                 "body_length": len(sub),
                 "chunk_index": len(chunks),
                 "total_chunks": None,
@@ -228,6 +213,29 @@ def _chunk_hwp_row(row: pd.Series, use_meta_prefix: bool = True, include_tables:
             })
 
     return chunks
+
+
+# ============================================================
+# 메타부착 후처리
+# ============================================================
+
+def attach_meta_prefix(df_chunked: pd.DataFrame) -> pd.DataFrame:
+    """
+    순수 본문 청크에 핵심 메타 prefix를 후처리로 부착
+    """
+    df = df_chunked.copy()
+
+    org = df["발주 기관"].fillna("미상").astype(str).str.strip()
+    biz = df["사업명"].fillna("미상").astype(str).str.strip()
+    body = df["content"].fillna("").astype(str).str.strip()
+
+    prefix = "[발주기관: " + org + " | 사업명: " + biz + "]"
+
+    mask = body.ne("")
+    df.loc[mask, "content"] = prefix[mask] + "\n\n" + body[mask]
+    df.loc[~mask, "content"] = body[~mask]
+
+    return df
 
 
 # ============================================================
@@ -239,106 +247,118 @@ META_COLS = ["공고 번호", "공고 차수", "발주 기관", "사업명", "�
 
 
 def process_chunking_v2(
-    df_pdf_parsed: pd.DataFrame,
-    df_hwp_parsed: pd.DataFrame,
     df_meta: pd.DataFrame,
     use_meta_prefix: bool = True,
     include_tables: bool = True, 
+    use_cache: bool = False
 ) -> pd.DataFrame:
     """
     PDF/HWP 각각 청킹 후 concat.
 
     Parameters
     ----------
-    df_pdf_parsed : PDF 파싱 결과 (csv 로드)
-                    컬럼: 파일명, 파일형식, raw_text, clean_text
-    df_hwp_parsed : HWP 파싱 결과 (pkl 로드)
-                    컬럼: 파일명, 파일형식, raw_text, clean_text, sections, tables
-    df_meta       : 메타데이터 csv
-    use_meta_prefix : 청크 앞에 [발주기관|사업명] 부착 여부
-    include_tables : 표 청킹 여부
+    df_meta         : 메타데이터 csv
+    use_meta_prefix : 핵심메타 부착여부
+    include_tables  : 표 청킹 여부
+    use_cache       : True면 캐시 파일 존재 시 청킹 건너뛰고 로드
 
     Returns
     -------
     pd.DataFrame : 청크 단위 데이터프레임
     """
+
+    # 저장 경로 분기
+    if include_tables:
+        cache_path = config.PKL_PATH_V21
+    else:
+        cache_path = config.PKL_PATH_V22
+
     meta_cols_for_merge = ["파일명"] + [c for c in META_COLS if c in df_meta.columns]
 
-    # ------------------------------------------------------------------
-    # PDF 청킹
-    # ------------------------------------------------------------------
-    print(f"PDF 청킹 시작: {len(df_pdf_parsed)}건")
-    df_pdf = df_pdf_parsed.copy()
+    # 1) 캐시 로드
+    if use_cache and Path(cache_path).exists():
+        print(f"캐시 로드: OUTPUT_DIR/{Path(cache_path).name}")
+        t_cache = time.time()
+        df_chunked = pd.read_pickle(cache_path)
+        print(f"캐시 pkl 로드 시간: {time.time() - t_cache:.2f}s")
 
-    if "rag_text" in df_pdf.columns and "clean_text" not in df_pdf.columns:
-        df_pdf = df_pdf.rename(columns={"rag_text": "clean_text"})
-    elif "rag_text" in df_pdf.columns and "clean_text" in df_pdf.columns:
-        df_pdf = df_pdf.drop(columns=["rag_text"])
+    else: 
+        df_pdf_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed_pdf_hard.csv", encoding="utf-8")
+        df_hwp_parsed = pd.read_pickle(OUTPUT_DIR / "df_parsed_hwp_v2.pkl")
 
-    df_pdf = df_pdf.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
-    df_pdf["_chunks"] = df_pdf.apply(
-        lambda row: _chunk_pdf_row(row, use_meta_prefix), axis=1
-    )
+    # 2) PDF 청킹
+        print(f"PDF 청킹 시작: {len(df_pdf_parsed)}건")
+        df_pdf = df_pdf_parsed.copy()
 
-    chunked_pdf = df_pdf.explode("_chunks").reset_index(drop=True)
-    chunked_pdf = chunked_pdf[chunked_pdf["_chunks"].notna()].copy()
-    chunk_fields_pdf = pd.json_normalize(chunked_pdf["_chunks"])
-    chunked_pdf = chunked_pdf.drop(columns=["_chunks"]).reset_index(drop=True)
-    chunked_pdf = pd.concat([chunked_pdf, chunk_fields_pdf], axis=1)
-    print(f"  PDF 청크 수: {len(chunked_pdf)}")
+        if "rag_text" in df_pdf.columns and "clean_text" not in df_pdf.columns:
+            df_pdf = df_pdf.rename(columns={"rag_text": "clean_text"})
+        elif "rag_text" in df_pdf.columns and "clean_text" in df_pdf.columns:
+            df_pdf = df_pdf.drop(columns=["rag_text"])
 
-    # ------------------------------------------------------------------
-    # HWP 청킹
-    # ------------------------------------------------------------------
-    print(f"HWP 청킹 시작: {len(df_hwp_parsed)}건")
-    df_hwp = df_hwp_parsed.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
-    df_hwp["_chunks"] = df_hwp.apply(
-        lambda row: _chunk_hwp_row(row, use_meta_prefix, include_tables), axis=1
-    )
+        df_pdf = df_pdf.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
+        df_pdf["_chunks"] = df_pdf.apply(
+            lambda row: _chunk_pdf_row(row), axis=1
+        )
 
-    chunked_hwp = df_hwp.explode("_chunks").reset_index(drop=True)
-    chunked_hwp = chunked_hwp[chunked_hwp["_chunks"].notna()].copy()
-    chunk_fields_hwp = pd.json_normalize(chunked_hwp["_chunks"])
-    chunked_hwp = chunked_hwp.drop(columns=["_chunks"]).reset_index(drop=True)
-    chunked_hwp = pd.concat([chunked_hwp, chunk_fields_hwp], axis=1)
-    print(f"  HWP 청크 수: {len(chunked_hwp)}")
+        chunked_pdf = df_pdf.explode("_chunks").reset_index(drop=True)
+        chunked_pdf = chunked_pdf[chunked_pdf["_chunks"].notna()].copy()
+        chunk_fields_pdf = pd.json_normalize(chunked_pdf["_chunks"])
+        chunked_pdf = chunked_pdf.drop(columns=["_chunks"]).reset_index(drop=True)
+        chunked_pdf = pd.concat([chunked_pdf, chunk_fields_pdf], axis=1)
+        print(f"  PDF 청크 수: {len(chunked_pdf)}")
 
-    # ------------------------------------------------------------------
-    # concat
-    # ------------------------------------------------------------------
-    chunked_df = pd.concat([chunked_pdf, chunked_hwp], ignore_index=True)
+        # 3) HWP 청킹
+        print(f"HWP 청킹 시작: {len(df_hwp_parsed)}건")
+        df_hwp = df_hwp_parsed.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
+        df_hwp["_chunks"] = df_hwp.apply(
+            lambda row: _chunk_hwp_row(row, include_tables), axis=1
+        )
 
-    # 불필요 컬럼 제거 및 이름 정리
-    chunked_df = chunked_df.drop(
-        columns=["sections", "tables", "sections_json", "tables_json"],
-        errors="ignore"
-    )
-    chunked_df = chunked_df.rename(columns={"파일명": "source"})
+        chunked_hwp = df_hwp.explode("_chunks").reset_index(drop=True)
+        chunked_hwp = chunked_hwp[chunked_hwp["_chunks"].notna()].copy()
+        chunk_fields_hwp = pd.json_normalize(chunked_hwp["_chunks"])
+        chunked_hwp = chunked_hwp.drop(columns=["_chunks"]).reset_index(drop=True)
+        chunked_hwp = pd.concat([chunked_hwp, chunk_fields_hwp], axis=1)
+        print(f"  HWP 청크 수: {len(chunked_hwp)}")
 
-    # 저장
-    chunked_df.to_csv(config.CSV_PATH_V2, index=False, encoding="utf-8")
-    print(f"\n청킹 완료: PDF {len(chunked_pdf)} + HWP {len(chunked_hwp)} = 총 {len(chunked_df)}개 청크")
-    print(f"저장 완료: OUTPUT_DIR/{Path(config.CSV_PATH_V2).name}")
-    print(chunked_df["chunk_type"].value_counts())
+        # 3) concat
+        chunked_df = pd.concat([chunked_pdf, chunked_hwp], ignore_index=True)
 
-    return chunked_df
+        # 불필요 컬럼 제거 및 이름 정리
+        chunked_df = chunked_df.drop(
+            columns=["sections", "tables", "sections_json", "tables_json"],
+            errors="ignore"
+        )
+        chunked_df = chunked_df.rename(columns={"파일명": "source"})
 
+        # 4) 캐시저장
+        chunked_df.to_pickle(cache_path)
+        print(f"\n청킹 완료: PDF {len(chunked_pdf)} + HWP {len(chunked_hwp)} = 총 {len(chunked_df)}개 청크")
+        print(f"저장 완료: OUTPUT_DIR/{Path(cache_path).name}")
+        print(chunked_df["chunk_type"].value_counts())
 
-# 단독실행
-if __name__ == "__main__":
-    import time
-    CHUNK_OPTION = False  # 핵심메타 부착여부
-    INCLUDE_TABLES = False  # 표 청킹 생략(섹션 청킹만)
-    print(f"\n--- chunker_v2 실행 (meta_prefix: {CHUNK_OPTION}, include_tables: {INCLUDE_TABLES}) ---")
+        df_chunked = chunked_df
 
-    df_pdf_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed_pdf_hard.csv", encoding="utf-8")
-    df_hwp_parsed = pd.read_pickle(OUTPUT_DIR / "df_parsed_hwp_v2.pkl")
-    df_meta = pd.read_csv(OUTPUT_DIR / "data_list_metadata.csv", encoding="utf-8")
-
-    if CHUNK_OPTION:
+    # 5) 메타 부착 후처리
+    if use_meta_prefix:
         print("핵심 메타를 청크에 부착합니다")
+        df_chunked = attach_meta_prefix(df_chunked)
     else:
         print("핵심 메타 부착을 건너뜁니다")
+
+    return df_chunked
+
+
+# 단독실행 (T/F 바꿔보기) 
+# 1회차 캐시생성시 False/True/False & False/False/False, 이후 캐시로드시 USE_CACHE=True
+if __name__ == "__main__":
+    import time
+    ATTACH_OPTION   = False   # 핵심메타 부착여부
+    INCLUDE_TABLES = False  # True: 표 포함 / False: 표 제외
+    USE_CACHE      = False  # 캐시 사용여부
+    print(f"\n--- chunker_v2 실행 (meta_prefix: {ATTACH_OPTION}, include_tables: {INCLUDE_TABLES}, cache: {USE_CACHE}) ---")
+
+    df_meta = pd.read_csv(OUTPUT_DIR / "data_list_metadata.csv", encoding="utf-8")
 
     if INCLUDE_TABLES:
         print("표 청킹을 포함합니다")
@@ -346,13 +366,13 @@ if __name__ == "__main__":
         print("표 청킹을 생략합니다")
 
     start = time.time()
-    result = process_chunking_v2(
-        df_pdf_parsed=df_pdf_parsed,
-        df_hwp_parsed=df_hwp_parsed,
+    chunked_df = process_chunking_v2(
         df_meta=df_meta,
-        use_meta_prefix=CHUNK_OPTION,
+        use_meta_prefix=ATTACH_OPTION,
         include_tables=INCLUDE_TABLES,
+        use_cache=USE_CACHE
     )
     elapsed = time.time() - start
+
     print(f"\n총 소요 시간: {elapsed:.2f}s")
-    print(f"청크당 평균 처리 시간: {elapsed / len(result):.4f}s")
+    print(f"청크당 평균 처리 시간: {elapsed / len(chunked_df):.4f}s")

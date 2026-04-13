@@ -30,15 +30,17 @@ def meta_pipeline(df: pd.DataFrame, use_cleaning=True) -> pd.DataFrame:
     else:
         print("메타데이터 정제를 건너뜁니다")
         df_meta = df.copy()
-        df_meta = pd.read_csv(input_csv_path, encoding="utf-8")
         print(f"사용 파일: DATABASE_DIR/{input_csv_path.name}\n")
     
     return df_meta
 
 
 # 청킹 파이프라인 v1 (구조추출X)
-def chunk_pipeline(df_parsed: pd.DataFrame, df_meta: pd.DataFrame, use_meta_prefix: bool = True
-    ) -> pd.DataFrame:
+def chunk_pipeline(
+    df_parsed: pd.DataFrame, 
+    df_meta: pd.DataFrame, 
+    use_meta_prefix: bool = True
+) -> pd.DataFrame:
     """
     Parameters
     ----------
@@ -71,21 +73,14 @@ def chunk_pipeline_v2(
     df_meta: pd.DataFrame,
     use_meta_prefix: bool = True,
     include_tables: bool = True,
+    use_cache: bool = True
 ) -> pd.DataFrame:
     """
     PDF/HWP 파싱 결과를 각각 청킹 후 concat.
     파싱은 이미 완료되어 OUTPUT_DIR에 저장된 파일을 사용.
     """
 
-    df_pdf_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed_pdf_hard.csv", encoding="utf-8")
-    df_hwp_parsed = pd.read_pickle(OUTPUT_DIR / "df_parsed_hwp_v2.pkl")
-
-    print(f"\n--- start chunk pipeline v2 (meta_prefix: {use_meta_prefix}, include_tables: {include_tables}) ---")
-
-    if use_meta_prefix:
-        print("핵심 메타를 청크에 부착합니다")
-    else:
-        print("핵심 메타 부착을 건너뜁니다")
+    print(f"--- start chunk pipeline v2 (meta_prefix: {use_meta_prefix}, include_tables: {include_tables}, cache: {use_cache}) ---")
 
     if include_tables:
         print("표 청킹을 포함합니다")
@@ -93,11 +88,10 @@ def chunk_pipeline_v2(
         print("표 청킹을 생략합니다")
 
     df_chunked = process_chunking_v2(
-        df_pdf_parsed=df_pdf_parsed,
-        df_hwp_parsed=df_hwp_parsed,
         df_meta=df_meta,
         use_meta_prefix=use_meta_prefix,
         include_tables=include_tables,
+        use_cache=use_cache
     )
 
     print("\ncontent 샘플 확인:")
@@ -118,15 +112,16 @@ def chunk_pipeline_v2(
 # 작업파일 단독실행용 v2 (여기서 T/F 파라미터 바꿔보기)
 if __name__ == "__main__":
     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")
-    df_meta = meta_pipeline(df, use_cleaning=False)
-    df_chunked = chunk_pipeline_v2(df_meta, use_meta_prefix=False, include_tables=False) # 내부에 파싱데이터 포함
+    df_meta = meta_pipeline(df, use_cleaning=True)
+    df_chunked = chunk_pipeline_v2(df_meta=df_meta, use_meta_prefix=True, include_tables=True, use_cache=True) # 내부에 파싱데이터 포함
 
 
-# ========== v1 사용시 ==========
+# ==================== v1 사용시 ====================
 # run_pipe 작성 방법 <-run_pipe는 hs님이 만든 모듈 임의명칭
-# def run_pipe(use_cleaning: bool = True, use_meta_prefix: bool = True):
+# def run_pipe(use_cleaning: bool = True, 
+#              use_meta_prefix: bool = True):
 #     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")  # 1. 불러오기
-#     df_meta = meta_pipeline(use_cleaning=use_cleaning)   # 2. 메타데이터 정제
+#     df_meta = meta_pipeline(df, use_cleaning=use_cleaning)   # 2. 메타데이터 정제
 #     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)  # 3.df_parsed.csv생성
 #     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=use_meta_prefix)  # 4. 청킹
 #     return df_chunked
@@ -136,29 +131,33 @@ if __name__ == "__main__":
 #
 # if __name__ == "__main__":
 #     META_OPTION = True   # 옵션값을 여기서 조절
-#     CHUNK_OPTION = True
-#     run_pipe(use_cleaning=META_OPTION, use_meta_prefix=CHUNK_OPTION)
+#     ATTACH_OPTION = True
+#     run_pipe(use_cleaning=META_OPTION, use_meta_prefix=ATTACH_OPTION)
 
 # ----- src/embedding/vector_store.py 수정필요X -----
 # df = pd.read_csv(config.CSV_PATH) 
 
 
-# ========== v2 사용시 ==========
-# run_pipe 작성 방법 <-run_pipe는 hs님이 만든 모듈 임의명칭
-# def run_pipe(use_cleaning: bool = True, use_meta_prefix: bool = True, include_tables: bool = True):
+# ==================== v2 사용시 ====================
+# run_pipe_v2 작성 방법 <-run_pipe_v2는 임의명칭
+# def run_pipe_v2(use_cleaning: bool = True, 
+#                use_meta_prefix: bool = True, 
+#                include_tables: bool = True,
+#                use_cache: bool = True):
 #     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")  # 1. 불러오기
-#     df_meta = meta_pipeline(use_cleaning=use_cleaning)   # 2. 메타데이터 정제
-#     df_chunked = chunk_pipeline_v2(df_meta=df_meta, use_meta_prefix=use_meta_prefix, include_tables=include_tables)  # 3. 청킹
+#     df_meta = meta_pipeline(df, use_cleaning=use_cleaning)   # 2. 메타데이터 정제
+#     df_chunked = chunk_pipeline_v2(df_meta=df_meta, use_meta_prefix=use_meta_prefix, include_tables=include_tables, use_cache=use_cache)  # 3. 청킹
 #     return df_chunked
 
 # ----- main.py 에 필요한 코드 -----
-# from src.pipeline.rag_pipeline import run_pipe 
+# from src.pipeline.rag_pipeline import run_pipe_v2 
 #
 # if __name__ == "__main__":
 #     META_OPTION = True     # 메타데이터 정제 여부
-#     CHUNK_OPTION = True    # 청크에 핵심메타 부착여부
+#     ATTACH_OPTION = True   # 청크에 핵심메타 부착여부
 #     INCLUDE_TABLES = True  # 표 청킹 포함 여부
-#     run_pipe(use_cleaning=META_OPTION, use_meta_prefix=CHUNK_OPTION, include_tables=INCLUDE_TABLES)
+#     USE_CACHE = True       # 캐시 사용 여부True
+#     run_pipe_v2(use_cleaning=META_OPTION, use_meta_prefix=ATTACH_OPTION, include_tables=INCLUDE_TABLES, use_cache=USE_CACHE)
 
 # ----- src/embedding/vector_store.py 수정필요 -----
-# df = pd.read_csv(config.CSV_PATH_V2)  # CSV_PATH → CSV_PATH_V2
+# df = pd.read_pickle(config.CSV_PATH)의 CSV_PATH를 PKL_PATH_V21 또는 PKL_PATH_V22로 바꾸기
