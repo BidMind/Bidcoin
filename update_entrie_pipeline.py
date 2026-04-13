@@ -32,7 +32,7 @@ def update_entrie_pipeline(use_cleaning: bool = True, use_meta_prefix: bool = Tr
 
     # [2] 메타데이터 정제 및 재파싱
     print("\n 메타데이터 정제 및 재파싱 진행중...")
-    df_meta = meta_pipeline(use_cleaning=use_cleaning)
+    df_meta = meta_pipeline(df, use_cleaning=use_cleaning)
 
     # [3] 텍스트 청킹 및 메타데이터 결합 진행
     print("\n 텍스트 청킹 및 메타데이터 결합 진행...")
