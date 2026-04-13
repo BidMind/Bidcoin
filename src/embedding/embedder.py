@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from langchain_openai import OpenAIEmbeddings
 import config
 

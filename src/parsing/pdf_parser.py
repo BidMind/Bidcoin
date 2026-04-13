@@ -12,7 +12,6 @@ pdf_parser.py — PDF 파일 파싱 및 정제 모듈
 
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 from pathlib import Path
@@ -21,7 +20,7 @@ from typing import List, Optional
 import fitz          # pymupdf
 import pandas as pd
 
-
+fitz.TOOLS.mupdf_display_errors(False)
 # ---------------------------------------------------------------------------
 # (1) 원문 추출
 # ---------------------------------------------------------------------------

@@ -21,8 +21,8 @@ from typing import Optional
 
 import pandas as pd
 
-from parsing.pdf_parser import parse_pdf_folder
-from parsing.hwp_parser import parse_hwp_folder_raw
+from src.parsing.pdf_parser import parse_pdf_folder
+from src.parsing.hwp_parser import parse_hwp_folder_raw
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ def run_full_pipeline(
 
     output_path = out / "df_parsed.csv"
     df_merge.to_csv(output_path, index=False, encoding="utf-8")
-    print(f"최종 저장 완료: {output_path}  (총 {len(df_merge)}건)")
+    print(f"저장 완료: OUTPUT_DIR/{output_path.name} (총 {len(df_merge)}건)")
     print("=" * 50)
 
     return df_merge

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from rag_api import get_rag_context
 from .generator import BidCoinGenerator
-from .mock_data import get_mock_retrieval_result
-
+from .schemas import RetrievalResult
 
 def main() -> None:
-    retrieval_result = get_mock_retrieval_result()
+    question = "거기의 예산은 얼마인가요?"
+    history = []
+    
+    raw_result = get_rag_context(question, history)
+    retrieval_result = RetrievalResult.model_validate(raw_result)
     generator = BidCoinGenerator()
     result = generator.generate(retrieval_result)
 

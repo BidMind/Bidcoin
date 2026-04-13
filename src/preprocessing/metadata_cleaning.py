@@ -8,10 +8,11 @@ preprocessing/metadata_cleaning.py
 
 사용 예시
 ---------
-from preprocessing.metadata_cleaning import process_metadata
+from src.preprocessing.metadata_cleaning import process_metadata
 
 df = pd.read_csv("data_list.csv", encoding="utf-8")
-df = process_metadata(df, files_dir="/home/shared/files")
+df = process_metadata(df, files_dir=DATABASE_DIR/"files")
+df.to_csv("data_list_metadata.csv", index=False, encoding="utf-8")
 """
 
 from __future__ import annotations
@@ -26,7 +27,14 @@ import pandas as pd
 import fitz          # pymupdf
 import olefile
 
+from pathlib import Path
+from dotenv import load_dotenv
+from config import DATABASE_DIR, OUTPUT_DIR
 
+ROOT_DIR = Path(__file__).resolve().parent  
+load_dotenv(ROOT_DIR / ".env")
+
+fitz.TOOLS.mupdf_display_errors(False)
 # ============================================================
 # (1) 파일명 / 파일형식 수정
 # ============================================================
@@ -411,28 +419,24 @@ def _reparse_hwp(df: pd.DataFrame, files_dir: str) -> pd.DataFrame:
 # 메인 함수
 # ============================================================
 
-def process_metadata(
-    df: pd.DataFrame,
-    files_dir: str = "/home/shared/files",
-) -> pd.DataFrame:
+def process_metadata(df: pd.DataFrame, files_dir: str
+    ) -> pd.DataFrame:
     """
     메타데이터 정제 전체 파이프라인.
-
+ 
     Parameters
     ----------
-    df : pd.DataFrame
-        data_list.csv를 읽어 들인 원본 데이터프레임.
-    files_dir : str
-        실제 HWP/PDF 파일이 있는 디렉터리 경로.
-        텍스트 재파싱이 필요 없으면 무시해도 무방하나,
-        파일이 존재해야 재파싱이 수행됩니다.
-
+    df        : pd.read_csv 등으로 이미 로드된 DataFrame
+    files_dir : PDF/HWP 원본 파일이 위치한 디렉터리 경로
+ 
     Returns
     -------
-    pd.DataFrame
-        파일명/형식 수정 → 결측처리 → 텍스트 재파싱이 완료된 데이터프레임.
+    정제가 완료된 DataFrame (저장은 호출자가 담당)
     """
     df = df.copy()
+
+    print("=" * 60)
+    print(f"행 개수: {len(df)}")
 
     # (1) 파일명 / 파일형식 수정
     print("=" * 60)
@@ -460,8 +464,17 @@ def process_metadata(
     print("process_metadata 완료")
     return df
 
-# main에서 메타데이터 로드 필요
-#ex.
-# df = pd.read_csv("data_list.csv", encoding="utf-8") 
-# df = process_metadata(df, files_dir="/home/shared/files")
-# df.to_csv("data_list_metadata.csv", index=False, encoding="utf-8")
+
+# 작업파일 단독실행용 (불러오기/처리/저장 분리)
+if __name__ == "__main__": 
+    # src/pipeline/rag_pipeline.py에 작성
+    input_csv_path = DATABASE_DIR / "data_list.csv"
+    files_dir = DATABASE_DIR / "files"
+    output_csv_path = OUTPUT_DIR / "data_list_metadata.csv"
+ 
+    df = pd.read_csv(input_csv_path, encoding="utf-8")  # 불러오기
+    df_meta = process_metadata(df, files_dir=str(files_dir)) # 처리
+ 
+    output_csv_path.parent.mkdir(parents=True, exist_ok=True)  
+    df_meta.to_csv(output_csv_path, index=False, encoding="utf-8")  # 저장
+    print(f"저장 완료: OUTPUT_DIR/{output_csv_path.name}\n")
