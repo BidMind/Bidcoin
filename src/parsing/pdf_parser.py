@@ -20,7 +20,7 @@ from typing import List, Optional
 import fitz          # pymupdf
 import pandas as pd
 
-
+fitz.TOOLS.mupdf_display_errors(False)
 # ---------------------------------------------------------------------------
 # (1) 원문 추출
 # ---------------------------------------------------------------------------
