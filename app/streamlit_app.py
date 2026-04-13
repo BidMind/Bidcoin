@@ -5,22 +5,30 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+import fitz
 import sys
 import importlib.util
+from streamlit_pdf_viewer import pdf_viewer
 
 
-#ROOT_DIR = Path(__file__).resolve().parent.parent
-#if str(ROOT_DIR) not in sys.path:
-    #sys.path.insert(0, str(ROOT_DIR))
+"""
+다음 구현 기능:
 
-#from src.preprocessing.metadata_cleaning import process_metadata
+1. 데이터 전처리 - > Parsing -> Chunking -> 임베딩 생성 -> 벡터 DB 구축 작업 버튼 하나
+
+2. 세션 나눠서 대화 진행
+
+
+"""
 
 import streamlit as st
 from streamlit_pdf_viewer import pdf_viewer
 import pandas as pd
 
-#df = pd.read_csv("/home/shared/data_list.csv", encoding="utf-8") 
-#df = process_metadata(df, files_dir="/home/shared/files")
+df = pd.read_csv("/home/bidcoin/data_list_metadata.csv", encoding="utf-8") 
+ls = list(df["파일명"])
+dc = {df["파일명"][i]: df["파일형식"][i] for i in range(len(df))}  # 파일명-파일경로 매핑 딕셔너리
+
 
 # 더미 RAG 함수
 # -----------------------------
@@ -31,6 +39,7 @@ def run_rag(query, llm_name, temperature):
 # -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 def page_llm():
     st.set_page_config(page_title="RAG UI", layout="wide")
     st.title("Bidcoin")
@@ -158,12 +167,157 @@ def page_llm():
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
 
+
 def page_files():
     st.set_page_config(page_title="문서 뷰어", layout="wide")
+    PDF_OUTPUT_DIR = Path("/home/bidcoin/output_pdf")
     st.title("파일 뷰어")
-    files = ["a", "b", "c"]
-    selected_file = st.selectbox("파일 선택", files)
-    st.write("선택한 파일:", selected_file)
+    files = [i for i in ls]
+    left, right = st.columns([1, 2.4], gap="large")
+    
+    if "viewer_page" not in st.session_state:
+        st.session_state.viewer_page = 1
+
+    if "current_file" not in st.session_state:
+        st.session_state.current_file = None
+
+    if "search_pages" not in st.session_state:
+        st.session_state.search_pages = []
+
+    if "search_idx" not in st.session_state:
+        st.session_state.search_idx = 0
+
+    if "last_keyword" not in st.session_state:
+        st.session_state.last_keyword = ""
+
+    with left:
+        selected_file = st.selectbox("파일 선택", files)
+        st.write("선택한 파일:", selected_file)
+
+        pdf_name = f"{Path(selected_file).stem}.pdf"
+        pdf_path = PDF_OUTPUT_DIR / pdf_name
+
+        if st.session_state.current_file != selected_file:
+            st.session_state.current_file = selected_file
+            st.session_state.viewer_page = 1
+            st.session_state.search_pages = []
+            st.session_state.search_idx = 0
+            st.session_state.last_keyword = ""
+
+        keyword = st.text_input("문서 검색", placeholder="검색어 입력")
+
+
+        def find_text_pages(pdf_path, keyword):
+            pages = []
+            doc = fitz.open(pdf_path)
+
+
+            for i, page in enumerate(doc):
+                if page.search_for(keyword):
+                    pages.append(i + 1)
+            doc.close()
+            return pages
+
+        search_col1, search_col2 = st.columns([1, 1])
+
+        with search_col1:
+            if st.button("검색", use_container_width=True):
+                if pdf_path.exists() and keyword.strip():
+                    pages = find_text_pages(str(pdf_path), keyword.strip())
+                    st.session_state.search_pages = pages
+                    st.session_state.search_idx = 0
+                    st.session_state.last_keyword = keyword.strip()
+
+                    if pages:
+                        st.session_state.viewer_page = pages[0]
+                    else:
+                        st.session_state.viewer_page = 1
+                    st.rerun()
+
+        with search_col2:
+            if st.button("검색 초기화", use_container_width=True):
+                st.session_state.search_pages = []
+                st.session_state.search_idx = 0
+                st.session_state.last_keyword = ""
+                st.rerun()
+
+        if st.session_state.search_pages:
+            current_idx = st.session_state.search_idx
+            current_page = st.session_state.search_pages[current_idx]
+
+            st.success(
+                f"검색 결과: {st.session_state.search_pages}\n\n"
+                f"현재 검색 위치: {current_idx + 1} / {len(st.session_state.search_pages)}"
+                f" → {current_page}페이지"
+            )
+
+            r1, r2 = st.columns([1, 1])
+
+            with r1:
+                if st.button("이전 검색 결과", use_container_width=True):
+                    st.session_state.search_idx = max(0, st.session_state.search_idx - 1)
+                    st.session_state.viewer_page = st.session_state.search_pages[st.session_state.search_idx]
+                    st.rerun()
+
+            with r2:
+                if st.button("다음 검색 결과", use_container_width=True):
+                    st.session_state.search_idx = min(
+                        len(st.session_state.search_pages) - 1,
+                        st.session_state.search_idx + 1
+                    )
+                    st.session_state.viewer_page = st.session_state.search_pages[st.session_state.search_idx]
+                    st.rerun()
+
+        st.markdown("### 페이지 이동")
+        nav1, nav2, nav3 = st.columns([1, 1.2, 1])
+
+        with nav1:
+            if st.button("◀ 이전", use_container_width=True):
+                st.session_state.viewer_page = max(1, st.session_state.viewer_page - 1)
+                st.rerun()
+
+        with nav2:
+            page_input = st.number_input(
+                "페이지",
+                min_value=1,
+                step=1,
+                value=st.session_state.viewer_page
+            )
+            if page_input != st.session_state.viewer_page:
+                st.session_state.viewer_page = page_input
+                st.rerun()
+
+        with nav3:
+            if st.button("다음 ▶", use_container_width=True):
+                st.session_state.viewer_page += 1
+                st.rerun()
+                
+        if st.session_state.search_pages:
+            selected_result_page = st.selectbox(
+                "검색 결과 페이지 선택",
+                st.session_state.search_pages
+            )
+            if st.button("선택 페이지로 이동", use_container_width=True):
+                st.session_state.viewer_page = selected_result_page
+                st.session_state.search_idx = st.session_state.search_pages.index(selected_result_page)
+                st.rerun()
+
+
+    with right:
+
+        if pdf_path.exists():
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+
+            pdf_viewer(
+            input=pdf_bytes,
+            width="100%",
+            height=900,
+            render_text=True,
+            scroll_to_page=st.session_state.viewer_page
+        )
+        else:
+            st.warning(f"아직 PDF가 없습니다: {pdf_name}")
 
 
 menu = st.sidebar.selectbox("메뉴", ["LLM", "파일뷰어"])
