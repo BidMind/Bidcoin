@@ -5,13 +5,12 @@ from __future__ import annotations
 from .schemas import ChatTurn, RetrievedContext
 
 
-def build_history_block(chat_history: list[ChatTurn], max_turns: int = 3) -> str:
+def build_history_block(chat_history: list[ChatTurn]) -> str:
     if not chat_history:
         return "없음"
 
-    recent_history = chat_history[-max_turns:]
     lines: list[str] = []
-    for turn in recent_history:
+    for turn in chat_history:
         prefix = "사용자" if turn.role == "user" else "어시스턴트"
         lines.append(f"- {prefix}: {turn.content}")
     return "\n".join(lines)
