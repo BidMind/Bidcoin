@@ -20,7 +20,7 @@ class BidCoinGenerator:
             max_contexts=self.settings.max_contexts,
             max_chars=self.settings.max_context_chars,
         )
-        history_block = build_history_block(retrieval_result.chat_history, max_turns=3)
+        history_block = build_history_block(retrieval_result.chat_history)
         user_prompt = build_user_prompt(
             question=retrieval_result.question,
             context_block=context_block,
