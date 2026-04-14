@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from rag_api import get_rag_context
 from rag_api_v2 import get_rag_context2
 from src.generation.generator import BidCoinGenerator
 from src.generation.schemas import RetrievalResult
@@ -45,7 +44,7 @@ def main() -> None:
             recent_history = trim_history(history)
 
             # Retrieval 호출
-            raw_result = get_rag_context2(question, recent_history)
+            raw_result = get_rag_context(question, recent_history)
 
             # Retrieval 결과를 Generation에서 기대하는 스키마로 검증
             retrieval_result = RetrievalResult.model_validate(raw_result)
