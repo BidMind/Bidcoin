@@ -26,6 +26,10 @@ class BidCoinGenerator:
             context_block=context_block,
             history_block=history_block,
         )
+        
+        print("=== User Prompt - START===")
+        print(user_prompt)
+        print("=== User Prompt - END===")
 
         answer = self.llm.generate_text(
             instructions=SYSTEM_PROMPT,
