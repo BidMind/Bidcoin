@@ -16,6 +16,6 @@ class OpenAIClient:
             instructions=instructions,
             input=user_input,
             reasoning={"effort": self.settings.reasoning_effort},
-            temperature=self.settings.temperature,
+            # temperature=self.settings.temperature,
         )
         return response.output_text

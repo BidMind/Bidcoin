@@ -10,11 +10,11 @@ load_dotenv()
 @dataclass(slots=True)
 class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
-    model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    model: str = os.getenv("OPENAI_MODEL", "gpt-5")
     reasoning_effort: str = os.getenv("OPENAI_REASONING_EFFORT", "low")
-    temperature: float = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
+    # temperature: float = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
     max_contexts: int = int(os.getenv("MAX_CONTEXTS", "3"))
-    max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "12000"))
+    max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "20000"))
 
     def validate(self) -> None:
         if not self.openai_api_key:
