@@ -20,6 +20,7 @@ PKL_PATH_V21 = OUTPUT_DIR  / "processed_data_v21.pkl"  # 파싱v2(표 포함)
 PKL_PATH_V22 = OUTPUT_DIR  / "processed_data_v22.pkl"  # 파싱v2(표 미포함)
 
 FAISS_INDEX_DIR = ROOT_DIR / "faiss_index"
+FAISS_INDEX_DIR_V2 = ROOT_DIR / "faiss_index_v2"
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")

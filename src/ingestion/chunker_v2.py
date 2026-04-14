@@ -73,18 +73,6 @@ def _get_splitter_hwp_table(text_len: int) -> RecursiveCharacterTextSplitter:
 # 헬퍼
 # ============================================================
 
-def _safe_str(val):
-    if pd.isna(val):
-        return "미상"
-    return str(val).strip()
-
-
-def _build_content_prefix(row: pd.Series) -> str:
-    return (
-        f"[발주기관: {_safe_str(row.get('발주 기관', '미상'))} | "
-        f"사업명: {_safe_str(row.get('사업명', '미상'))}]"
-    )
-
 
 def _parse_json_col(val) -> list:
     """sections_json / tables_json 컬럼 파싱."""
@@ -219,6 +207,31 @@ def _chunk_hwp_row(row: pd.Series, include_tables: bool = True,
 # 메타부착 후처리
 # ============================================================
 
+# 포맷
+def format_amount(val) -> str:
+    try:
+        amount = float(val)
+        if amount >= 1_0000_0000:  # 1억 이상
+            million_100 = amount / 1_0000_0000
+            return f"{million_100:g}억원"
+        elif amount >= 1000_0000:  # 1천만 이상
+            million_10 = amount / 1000_0000
+            return f"{million_10:g}천만원"
+        else:
+            return f"{int(amount):,}원"
+    except:
+        return "미상"
+
+def format_deadline(val) -> str:
+    try:
+        # pandas Timestamp나 문자열 모두 처리
+        dt = pd.to_datetime(str(val), errors="coerce")
+        if pd.isna(dt):
+            return "미상"
+        return f"{dt.year}년 {dt.month}월 {dt.day}일"
+    except:
+        return "미상"
+
 def attach_meta_prefix(df_chunked: pd.DataFrame) -> pd.DataFrame:
     """
     순수 본문 청크에 핵심 메타 prefix를 후처리로 부착
@@ -227,10 +240,16 @@ def attach_meta_prefix(df_chunked: pd.DataFrame) -> pd.DataFrame:
 
     org = df["발주 기관"].fillna("미상").astype(str).str.strip()
     biz = df["사업명"].fillna("미상").astype(str).str.strip()
+    amount = df["사업 금액"].apply(format_amount)
+    deadline = df["입찰 참여 마감일"].apply(format_deadline)
     body = df["content"].fillna("").astype(str).str.strip()
 
-    prefix = "[발주기관: " + org + " | 사업명: " + biz + "]"
-
+    prefix = (
+        "[발주기관: " + org + 
+        " | 사업명: " + biz + 
+        " | 사업금액: " + amount + 
+        " | 입찰마감일: " + deadline + "]"
+    )
     mask = body.ne("")
     df.loc[mask, "content"] = prefix[mask] + "\n\n" + body[mask]
     df.loc[~mask, "content"] = body[~mask]
