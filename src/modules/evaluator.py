@@ -12,8 +12,9 @@ def evaluate_contexts(query: str, contexts: list) -> bool:
     combined_text = "\n".join([c["text"] for c in contexts])
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """너는 엄격한 팩트 체커야. 주어진 [문서들]의 내용만으로 [사용자 질문]에 대한 명확한 답변이 가능한지 평가해.
-        답변이 가능하면 'YES', 문서 내용이 부족하거나 엉뚱하다면 'NO'를 출력해."""),
+        ("system", """당신은 검색된 문서들이 질문에 답할 수 있는지 판단하는 검열관입니다.
+완벽하고 직접적인 정답이 없더라도, 주어진 문서들을 조합하여 질문에 대한 '부분적인 답변'이나 '관련 배경지식'을 제공할 수 있다면 승인(True) 하세요.
+정보가 부족하여 명백히 '환각(Hallucination)'을 일으킬 위험이 있을 때만 거절(False)하세요."""),
         ("human", "[사용자 질문]: {query}\n\n[문서들]: {combined_text}")
     ])
     
