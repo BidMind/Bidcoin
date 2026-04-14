@@ -20,13 +20,18 @@ class BidCoinGenerator:
             max_contexts=self.settings.max_contexts,
             max_chars=self.settings.max_context_chars,
         )
+        
+        print("=== context_block - START===")
+        print(context_block)
+        print("=== context_block - END===")
+
         history_block = build_history_block(retrieval_result.chat_history)
         user_prompt = build_user_prompt(
             question=retrieval_result.question,
             context_block=context_block,
             history_block=history_block,
         )
-
+        
         answer = self.llm.generate_text(
             instructions=SYSTEM_PROMPT,
             user_input=user_prompt,

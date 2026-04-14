@@ -30,7 +30,7 @@ def _context_header(context: RetrievedContext, idx: int) -> str:
 def build_context_block(
     contexts: list[RetrievedContext],
     max_contexts: int = 3,
-    max_chars: int = 12000,
+    max_chars: int = 20000,
 ) -> tuple[str, list[str]]:
     if not contexts:
         return "검색된 문서가 없습니다.", []
