@@ -2,14 +2,14 @@ import math
 import uuid
 from typing import List, Dict, Any, Optional
 
-# 🧩 내부 모듈 임포트
+# 내부 모듈 임포트
 from src.modules.router import route_query
 from src.modules.reformulator import reformulate_query
 from src.modules.hyde import generate_hyde_document
 from src.modules.compressor import compress_document
 from src.modules.evaluator import evaluate_contexts
 from src.retrieval.retriever import retrieve_candidates
-from src.retrieval.reranker import rerank_and_score
+from src.retrieval.reranker_debug import rerank_and_score
 
 SCORE_THRESHOLD = 0.8  # 랭킹 점수 임계값
 
@@ -55,7 +55,7 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     # --------------------------------------------------
     # 주의: 1차 검색은 길게 뻗은 '가상 문서'로, 2차 팩트 랭킹은 깔끔한 '재구성된 질문'으로 진행합니다.
     candidates = retrieve_candidates(hyde_doc, k=10) 
-    top_docs = rerank_and_score(search_query, candidates, top_n=3) 
+    top_docs = rerank_and_score(query, candidates, top_n=3) 
     print(f"[Step 4: 검색 & 랭킹] 최상위 문서 추출 및 유사도 계산 완료")
 
     # --------------------------------------------------
