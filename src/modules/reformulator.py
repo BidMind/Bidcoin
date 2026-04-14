@@ -24,8 +24,10 @@ def reformulate_query(query: str, chat_history: list = None) -> str:
     ])
     
     # 4. 딕셔너리 형태의 대화 기록을 LLM이 읽기 편한 문자열로 변환
-    history_str = "\n".join([f"User: {msg.get('user', '')}\nBot: {msg.get('bot', '')}" for msg in chat_history])
-    
+    history_str = "\n".join([
+        f"{'User' if msg.get('role') == 'user' else 'Bot'}: {msg.get('content', '')}"
+        for msg in chat_history
+    ])
     # 5. 실행 및 무중단 에러 방어
     try:
         chain = prompt | llm

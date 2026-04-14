@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from rag_api_v2 import get_rag_context2
+from rag_api_v2 import get_rag_context
 from src.generation.generator import BidCoinGenerator
 from src.generation.schemas import RetrievalResult
 
