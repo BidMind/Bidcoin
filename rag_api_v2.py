@@ -80,7 +80,7 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
         source_file = doc.metadata.get("source", "unknown")
         
         # 2차 가드레일 (시맨틱 필터링)
-        compressed_text = compress_document(search_query, original_text)
+        compressed_text = compress_document(query, original_text)
         if compressed_text == "PASS":
             print(f"   [내용 없음 버림] {source_file}")
             continue
@@ -107,7 +107,7 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     # --------------------------------------------------
     if contexts:
         print(f"[Step 6: 자가 반성] 최종 팩트 체크 진행 중...")
-        if not evaluate_contexts(search_query, contexts):
+        if not evaluate_contexts(query, contexts):
             print("    [Self-RAG 경고] 문서 내용은 있으나 질문에 완벽히 답하기 부족함. 환각 방지를 위해 결과 초기화.")
             contexts = []
         else:
