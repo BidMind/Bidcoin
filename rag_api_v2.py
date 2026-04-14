@@ -9,7 +9,7 @@ from src.modules.hyde import generate_hyde_document
 from src.modules.compressor import compress_document
 from src.modules.evaluator import evaluate_contexts
 from src.retrieval.retriever import retrieve_candidates
-from src.retrieval.reranker import rerank_and_score
+from src.retrieval.reranker_debug import rerank_and_score
 
 SCORE_THRESHOLD = 0.8  # 랭킹 점수 임계값
 
