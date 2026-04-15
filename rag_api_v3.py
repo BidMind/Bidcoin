@@ -55,8 +55,8 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     # Step 4: 1차 검색 및 2차 재정렬 (Retrieval & Reranking)
     # --------------------------------------------------
     # 주의: 1차 검색은 길게 뻗은 '가상 문서'로, 2차 팩트 랭킹은 깔끔한 '재구성된 질문'으로 진행합니다.
-    candidates = retrieve_candidates(hyde_doc, k=10) 
-    top_docs = rerank_and_score(search_query, candidates, top_n=3) 
+    candidates = retrieve_candidates(hyde_doc, original_query=query, k=10)  # 함수인자 수정
+    top_docs = rerank_and_score(search_query, candidates, top_n=3)  
     print(f"[Step 4: 검색 & 랭킹] 최상위 문서 추출 및 유사도 계산 완료")
 
     # --------------------------------------------------
