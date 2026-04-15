@@ -14,9 +14,9 @@ from src.retrieval.reranker_debug import rerank_and_score
 
 SCORE_THRESHOLD = 0.6  # 랭킹 점수 임계값
 
-def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    [기능] Bid Mind Advanced RAG 메인 파이프라인
+    [기능] Bid Mind Advanced RAG 메인 파이프라인 (v3 하이브리드)
     """
     # 파이썬 Mutable Default Argument 버그 방지
     if chat_history is None:
@@ -52,12 +52,18 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     print(f"[Step 3: HyDE 가상 문서 생성] 검색 명중률 증폭 완료")
 
     # --------------------------------------------------
-    # Step 4: 1차 검색 및 2차 재정렬 (Retrieval & Reranking)
+    # Step 4: 1차 하이브리드 검색 및 2차 재정렬 (Retrieval & Reranking)
     # --------------------------------------------------
-    # 주의: 1차 검색은 길게 뻗은 '가상 문서'로, 2차 팩트 랭킹은 깔끔한 '재구성된 질문'으로 진행합니다.
-    candidates = retrieve_candidates(hyde_doc, k=10) 
+    # - semantic_query: 벡터 검색(FAISS)용. 풍부한 맥락의 hyde_doc 사용.
+    # - keyword_query: 키워드 검색(BM25)용. 노이즈가 적은 search_query 사용.
+    candidates = retrieve_candidates(
+        semantic_query=hyde_doc,
+        keyword_query=search_query,
+        k=10
+    ) 
+
     top_docs = rerank_and_score(search_query, candidates, top_n=3) 
-    print(f"[Step 4: 검색 & 랭킹] 최상위 문서 추출 및 유사도 계산 완료")
+    print(f"[Step 4: 하이브리드 검색 & 랭킹] 최상위 문서 추출 및 유사도 계산 완료")
 
     # --------------------------------------------------
     # Step 5: 문맥 압축 및 필터링 (Context Compression)
@@ -65,41 +71,29 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     contexts = []
     print(f"[Step 5: 문맥 압축 가동]")
     for score, doc in top_docs:
-        # 1차 가드레일 (수학적 점수)
         if score < SCORE_THRESHOLD:
             source_file = doc.metadata.get("source", "unknown")
-            text_preview = doc.page_content[:100].replace("\n", " ") + "..."  # 간단한 텍스트 미리보기
-            print("\n" + "-"*60)
-            print(f" [Debug] 문서 필터링 됨 (커트라인 미달)")
-            print(f" 출처: {source_file}")
-            print(f" 점수: {score:.2f} (기준: {SCORE_THRESHOLD})")
-            print(f" 미리보기: {text_preview}")
-            print("\n" + "-"*60)
+            print(f"   [필터링] 점수 미달: {source_file} ({score:.2f} < {SCORE_THRESHOLD})")
             continue
             
         original_text = doc.page_content
         source_file = doc.metadata.get("source", "unknown")
         
-        # 2차 가드레일 (시맨틱 필터링)
         compressed_text = compress_document(search_query, original_text)
         if compressed_text == "PASS":
-            print(f"   [내용 없음 버림] {source_file}")
             continue
 
-        # 파일명 추출
-        clean_name = os.path.splitext(source_file)[0]  # 확장자 제거
-
-        # 확장자 제거, (_) 기준으로 기관/사업명 유추
+        clean_name = os.path.splitext(source_file)[0]
         parts = clean_name.split("_")
         
         contexts.append({
-            "chunk_id": f"bid_{uuid.uuid4().hex[:8]}", # 고유한 chunk ID 생성
-            "text": compressed_text, # 문서 내용
-            "source_file": source_file, # 원본 파일명
-            "organization": parts[0] if len(parts) > 0 else "unknown", # 기관명 유추
-            "project_name": parts[1] if len(parts) > 1 else clean_name, # 사업명 유추
-            "summary": compressed_text[:100].replace("\n", " ") + "...", # 간단한 요약 (앞 100자)
-            "score": math.trunc(score * 100) / 100 # 점수는 소수점 둘째 자리까지 표현
+            "chunk_id": f"bid_{uuid.uuid4().hex[:8]}",
+            "text": compressed_text,
+            "source_file": source_file,
+            "organization": parts[0] if len(parts) > 0 else "unknown",
+            "project_name": parts[1] if len(parts) > 1 else clean_name,
+            "summary": compressed_text[:100].replace("\n", " ") + "...",
+            "score": math.trunc(score * 100) / 100
         })
         print(f"    [압축 성공] {source_file} ({len(original_text)}자 ➡️ {len(compressed_text)}자)")
 
@@ -109,10 +103,10 @@ def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = 
     if contexts:
         print(f"[Step 6: 자가 반성] 최종 팩트 체크 진행 중...")
         if not evaluate_contexts(search_query, contexts):
-            print("    [Self-RAG 경고] 문서 내용은 있으나 질문에 완벽히 답하기 부족함. 환각 방지를 위해 결과 초기화.")
+            print("    [Self-RAG 경고] 문서 보강 필요. 환각 방지를 위해 결과 초기화.")
             contexts = []
         else:
-            print("   ✅ [Self-RAG 통과] 완벽한 답변을 위한 팩트 검증 완료.")
+            print("   ✅ [Self-RAG 통과] 팩트 검증 완료.")
     else:
         print(f" [Step 6: 자가 반성] 전달할 문서가 없어 검열 생략.")
 
