@@ -33,25 +33,25 @@ def update_entire_pipeline(use_cleaning: bool = True, use_meta_prefix: bool = Tr
         return
 
     # [1] PDF/HWP 파싱 → 병합
-    print("\n PDF 및 HWP 파싱 진행중...")
+    print("\n[1/4] PDF 및 HWP 파싱 진행중...")
     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)
 
     # [2] 메타데이터 정제 및 재파싱
-    print("\n 메타데이터 정제 및 재파싱 진행중...")
+    print("\n[2/4] 메타데이터 정제 및 재파싱 진행중...")
     df_meta = meta_pipeline(df, use_cleaning=use_cleaning)
 
     # [3] 텍스트 청킹 및 메타데이터 결합 진행
-    print("\n 텍스트 청킹 및 메타데이터 결합 진행...")
+    print("\n[3/4] 텍스트 청킹 및 메타데이터 결합 진행...")
     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=use_meta_prefix)
 
-    # [4] FAISS 벡터 스토어 구축 및 저장
-    print("\n 벡터 스토어 구축 및 저장 진행중...")
+    # [4] FAISS 벡터 스토어 + BM25 키워드 스토어 동시 구축 및 저장
+    print("\n[4/4] 하이브리드 검색 인덱스(FAISS & BM25) 구축 및 저장 진행중...")
     # build_and_save_db()는 내부적으로 config.CSV_PATH에 저장된 결과를 읽어옴
     build_and_save_db()
 
     print("="*60)
-    print("[Bid Coin] 파싱부터 DB 구축까지 모든 과정이 완료되었습니다!")
-    print("이제 검색이 가능합니다.")   
+    print("[Bid Coin] 파싱부터 하이브리드 DB 구축까지 모든 과정이 완료되었습니다!")
+    print("이제 FAISS와 BM25를 결합한 고도화된 검색이 가능합니다.")   
     print("="*60)
 
 if __name__ == "__main__":
