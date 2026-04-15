@@ -53,11 +53,9 @@ def chunk_pipeline(
     print(f"\n--- start chunk pipeline (meta_prefix: {use_meta_prefix}) ---")
  
     if use_meta_prefix:
-        print("핵심 메타를 청크에 부착합니다")
         df_chunked = process_chunking(df_parsed, df_meta, use_meta_prefix=True)
         
     else:
-        print("핵심 메타 부착을 건너뜁니다")
         df_chunked = process_chunking(df_parsed, df_meta, use_meta_prefix=False)
 
     print("\ncontent 샘플 확인:")
@@ -103,17 +101,17 @@ def chunk_pipeline_v2(
 
 
 # 작업파일 단독실행용 v1 (여기서 T/F 파라미터 바꿔보기)
-# if __name__ == "__main__":
-#     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")
-#     df_meta = meta_pipeline(df, use_cleaning=False)
-#     df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)
-#     df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=True)
-
-# 작업파일 단독실행용 v2 (여기서 T/F 파라미터 바꿔보기)
 if __name__ == "__main__":
     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")
-    df_meta = meta_pipeline(df, use_cleaning=True)
-    df_chunked = chunk_pipeline_v2(df_meta=df_meta, use_meta_prefix=True, include_tables=True, use_cache=True) # 내부에 파싱데이터 포함
+    df_meta = meta_pipeline(df, use_cleaning=False)
+    df_parsed = run_full_pipeline(folder_path=DATABASE_DIR / "files", output_dir=OUTPUT_DIR)
+    df_chunked = chunk_pipeline(df_parsed, df_meta, use_meta_prefix=True)
+
+# # 작업파일 단독실행용 v2 (여기서 T/F 파라미터 바꿔보기)
+# if __name__ == "__main__":
+#     df = pd.read_csv(DATABASE_DIR / "data_list.csv", encoding="utf-8")
+#     df_meta = meta_pipeline(df, use_cleaning=True)
+#     df_chunked = chunk_pipeline_v2(df_meta=df_meta, use_meta_prefix=True, include_tables=True, use_cache=True) # 내부에 파싱데이터 포함
 
 
 # ==================== v1 사용시 ====================

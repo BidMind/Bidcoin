@@ -64,43 +64,77 @@ def _build_content_prefix(row: pd.Series) -> str:
 # 행 단위 청킹 (청킹 대상: clean_text)
 # ============================================================
 
-def _chunk_row(row: pd.Series, use_meta_prefix: bool = True) -> list[dict]:
+def _chunk_row(row: pd.Series) -> list[dict]:
     """
-    단일 행의 clean_text를 청킹.
-    use_meta_prefix : bool
-        True  → content = [발주기관|사업명] + 본문청크
-        False → content = 본문청크만
-    반환값: 청크별 dict 리스트.
-      - content     : (핵심메타 +) 본문청크  (임베딩 대상)
-      - body_length : 본문 청크 길이 (헤더 제외, 청킹 품질 확인용)
-      - chunk_index : 0-based 청크 순서
-      - total_chunks: 해당 문서의 전체 청크 수
+    단일 행의 clean_text를 청킹. 메타 prefix 없이 순수 본문 청크만 반환
     """
     clean_text = row.get("clean_text", "")
     if pd.isna(clean_text) or len(str(clean_text).strip()) == 0:
         return []
 
     clean_text = str(clean_text).strip()
-    splitter = _get_splitter(len(clean_text))  # clean_text 길이 기준
+    splitter = _get_splitter(len(clean_text))
     chunks = splitter.split_text(clean_text)
-
     total = len(chunks)
- 
-    if use_meta_prefix:
-        prefix = _build_content_prefix(row)
-        contents = [f"{prefix}\n\n{chunk}" for chunk in chunks]
-    else:
-        contents = chunks
- 
+
     return [
         {
-            "content": content,
+            "content": chunk,          # 순수 본문만
             "body_length": len(chunk),
             "chunk_index": i,
             "total_chunks": total,
         }
-        for i, (chunk, content) in enumerate(zip(chunks, contents))
+        for i, chunk in enumerate(chunks)
     ]
+
+
+# ============================================================
+# 메타 부착 후처리
+# ============================================================
+
+def format_amount(val) -> str:
+    try:
+        amount = float(val)
+        if amount >= 1_0000_0000:
+            return f"{amount / 1_0000_0000:g}억원"
+        elif amount >= 1000_0000:
+            return f"{amount / 1000_0000:g}천만원"
+        else:
+            return f"{int(amount):,}원"
+    except:
+        return "미상"
+
+def format_deadline(val) -> str:
+    try:
+        dt = pd.to_datetime(str(val), errors="coerce")
+        if pd.isna(dt):
+            return "미상"
+        return f"{dt.year}년 {dt.month}월 {dt.day}일"
+    except:
+        return "미상"
+
+def attach_meta_prefix(df_chunked: pd.DataFrame) -> pd.DataFrame:
+    """청킹 완료 후 핵심 메타 prefix를 후처리로 부착."""
+    df = df_chunked.copy()
+
+    org      = df["발주 기관"].fillna("미상").astype(str).str.strip()
+    biz      = df["사업명"].fillna("미상").astype(str).str.strip()
+    amount   = df["사업 금액"].apply(format_amount)
+    deadline = df["입찰 참여 마감일"].apply(format_deadline)
+    body     = df["content"].fillna("").astype(str).str.strip()
+
+    prefix = (
+        "[발주기관: " + org +
+        " | 사업명: " + biz +
+        " | 사업금액: " + amount +
+        " | 입찰마감일: " + deadline + "]"
+    )
+    mask = body.ne("")
+    df.loc[mask,  "content"] = prefix[mask] + "\n\n" + body[mask]
+    df.loc[~mask, "content"] = body[~mask]
+
+    return df
+
 
 # ============================================================
 # 메인 함수
@@ -146,7 +180,7 @@ def process_chunking(
     df = df_parsed.merge(df_meta[meta_cols_for_merge], on="파일명", how="left")
  
     # 청킹: 각 행 → dict 리스트
-    df["_chunks"] = df.apply(lambda row: _chunk_row(row, use_meta_prefix), axis=1)
+    df["_chunks"] = df.apply(lambda row: _chunk_row(row), axis=1)
  
     chunked_df = df.explode("_chunks").reset_index(drop=True)
  
@@ -162,6 +196,13 @@ def process_chunking(
     chunked_df = chunked_df.drop(columns=["raw_text", "clean_text"], errors="ignore")
     chunked_df = chunked_df.rename(columns={"파일명": "source"})
  
+    # 메타 후처리 부착
+    if use_meta_prefix:
+        print("핵심 메타를 청크에 부착합니다")
+        chunked_df = attach_meta_prefix(chunked_df)
+    else:
+        print("핵심 메타 부착을 건너뜁니다")
+
     # config.CSV_PATH에 저장
     chunked_df.to_csv(config.CSV_PATH, index=False, encoding="utf-8")
     print(f"청킹 완료: 원본 {len(df_parsed)}건 → {len(chunked_df)}개 청크")
@@ -172,12 +213,8 @@ def process_chunking(
 
 # 작업파일 단독실행용
 if __name__ == "__main__":
-    CHUNK_OPTION = False
+    CHUNK_OPTION = True
     print(f"\n--- chunker 실행(meta_prefix: {CHUNK_OPTION}) ---")
     df_parsed = pd.read_csv(OUTPUT_DIR / "df_parsed.csv", encoding="utf-8")
     df_meta   = pd.read_csv(OUTPUT_DIR / "data_list_metadata.csv", encoding="utf-8")
-    if CHUNK_OPTION:
-        print("핵심 메타를 청크에 부착합니다")
-    else:
-        print("핵심 메타 부착을 건너뜁니다")
     process_chunking(df_parsed, df_meta, use_meta_prefix=CHUNK_OPTION)
