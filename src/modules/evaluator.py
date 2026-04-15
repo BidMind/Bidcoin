@@ -13,14 +13,21 @@ def evaluate_contexts(query: str, contexts: list) -> bool:
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", """당신은 검색된 문서들이 질문에 답할 수 있는지 판단하는 검열관입니다.
-완벽하고 직접적인 정답이 없더라도, 주어진 문서들을 조합하여 질문에 대한 '부분적인 답변'이나 '관련 배경지식'을 제공할 수 있다면 승인(True) 하세요.
-정보가 부족하여 명백히 '환각(Hallucination)'을 일으킬 위험이 있을 때만 거절(False)하세요."""),
+완벽하고 직접적인 정답이 없더라도, 주어진 문서들을 조합하여 질문에 대한 '부분적인 답변'이나 '관련 배경지식'을 제공할 수 있다면 오직 "YES" 라고만 대답하세요.
+정보가 부족하여 명백히 '환각(Hallucination)'을 일으킬 위험이 있을 때만 "NO" 라고 대답하세요.
+
+출력 규칙: 부연 설명 없이 대문자 "YES" 또는 "NO" 단 하나만 출력해야 합니다."""),
         ("human", "[사용자 질문]: {query}\n\n[문서들]: {combined_text}")
     ])
     
     try:
         decision = (prompt | llm).invoke({"query": query, "combined_text": combined_text}).content.strip().upper()
-        return decision == "YES"
+        if "YES" in decision:
+            return True
+        else:
+            print(f"   [Self-RAG 탈락 사유] LLM 판단 결과: {decision}")
+            return False
+            
     except Exception as e:
         print(f"⚠️ [검열 에러] 일단 통과시킴: {e}")
         return True

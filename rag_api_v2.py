@@ -13,7 +13,7 @@ from src.retrieval.reranker_debug import rerank_and_score
 
 SCORE_THRESHOLD = 0.6  # 랭킹 점수 임계값
 
-def get_rag_context2(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
     [기능] Bid Mind Advanced RAG 메인 파이프라인
     """
