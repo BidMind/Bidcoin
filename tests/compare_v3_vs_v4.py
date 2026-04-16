@@ -80,8 +80,13 @@ def run_benchmark():
     print(df.to_markdown(index=False))
     
     # 결과를 outputs 폴더에 CSV로 저장하여 나중에 분석할 수 있도록 함
-    output_path = "outputs/v3_vs_v4_benchmark_results.csv"
+    output_dir = "outputs"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir) # outputs 폴더가 없으면 마법처럼 생성!
+        
+    output_path = f"{output_dir}/v3_vs_v4_benchmark_results.csv"
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    
     print(f"\n✅ 상세 결과가 {output_path} 에 저장되었습니다.")
 
 if __name__ == "__main__":

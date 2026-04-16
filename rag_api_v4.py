@@ -1,8 +1,10 @@
 # rag_api_v3.py에 비용 절감, 속도 향상, 토큰 리밋 방어 리팩토링 버전
+# 스레드 병렬 처리 도입
 
 import math
 import uuid
 import os
+import concurrent.futures
 from typing import List, Dict, Any, Optional
 
 # 내부 모듈 임포트
@@ -68,7 +70,7 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
             semantic_query=sq, 
             keyword_query=sq,
             filters=extracted_filters, # 필터 장착!
-            k=10
+            k=6
         )
         all_candidates.extend(candidates) # 찾은 문서들을 바구니에 와르르 쏟아붓습니다.
         print(f"   [검색 완료] 쿼리 '{sq}' ➡️ 필터링된 후보 문서 {len(candidates)}개 확보")
@@ -101,33 +103,40 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
     # Step 5: 문맥 압축 및 필터링 (Context Compression)
     # ==================================================
     contexts = []
-    print(f"[Step 5: 문맥 압축 가동]")
-    for score, doc in top_docs:
+    print(f"[Step 5: 문맥 압축 가동] 비동기 병렬 처리 시작...")
+
+    # 1. 각각의 스레드(작업자)가 실행할 단일 압축 함수 정의
+    def _compress_worker(doc_info):
+        score, doc = doc_info
         if score < SCORE_THRESHOLD:
-            source_file = doc.metadata.get("source", "unknown")
-            print(f"   [필터링] 점수 미달: {source_file} ({score:.2f} < {SCORE_THRESHOLD})")
-            continue
+            return None
             
         original_text = doc.page_content
-        source_file = doc.metadata.get("source", "unknown")
-        
+        # LLM API 호출 지점 
         compressed_text = compress_document(combined_search_query, original_text)
-        if compressed_text == "PASS":
-            continue
-
-        clean_name = os.path.splitext(source_file)[0]
-        parts = clean_name.split("_")
         
-        contexts.append({
+        if compressed_text == "PASS":
+            return None    
+        
+        return {
             "chunk_id": f"bid_{uuid.uuid4().hex[:8]}",
             "text": compressed_text,
-            "source_file": source_file,
-            "organization": parts[0] if len(parts) > 0 else "unknown",
-            "project_name": parts[1] if len(parts) > 1 else clean_name,
+            "source_file": doc.metadata.get("source", "unknown"),
+            "organization": doc.metadata.get("발주 기관", "알 수 없음"),
+            "project_name": doc.metadata.get("사업명", "알 수 없음"),
             "summary": compressed_text[:100].replace("\n", " ") + "...",
             "score": math.trunc(score * 100) / 100
-        })
-        print(f"    [압축 성공] {source_file} ({len(original_text)}자 ➡️ {len(compressed_text)}자)")
+        }
+
+    # 2. 최대 5명의 작업자(Thread)를 고용하여 동시에 쫙 뿌립니다.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # map 함수를 사용해 top_docs의 문서들을 _compress_worker에 병렬로 던집니다.
+        results = list(executor.map(_compress_worker, top_docs))
+
+    # 3. None 값(임계값 미달 또는 PASS된 문서)을 깔끔하게 제거합니다.
+    contexts = [res for res in results if res is not None]
+    
+    print(f"    [압축 성공] 병렬 처리 완료. 최종 유효 문서 {len(contexts)}개 추출")        
 
     # ==================================================
     # Step 6: 자가 반성 (Self-RAG Evaluator) 및 가드레일 프리패스
