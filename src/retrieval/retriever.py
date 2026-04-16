@@ -47,7 +47,7 @@ def pass_metadata_filter(metadata: dict, filters: dict) -> bool:
     return True
 
 # [수정]
-def retrieve_candidates(semantic_query: str, keyword_query: str, k: int = 10):
+def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict = None, k: int = 10):
     """
     [기능] FAISS(의미)와 BM25(키워드) 검색을 결합한 하이브리드 검색을 수행합니다.
     - semantic_query: 의미 기반(벡터) 검색을 위한 긴 텍스트 (예: HyDE로 생성된 가상 문서)
