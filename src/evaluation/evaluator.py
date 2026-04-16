@@ -268,7 +268,7 @@ class Evaluator:
             contexts.append(ctx_chunks)
             references.append(item["answer"])
 
-        return M.ragas_evaluate(
+        ragas_result = M.ragas_evaluate(
             questions=questions,
             answers=answers,
             contexts=contexts,
@@ -277,6 +277,22 @@ class Evaluator:
             embeddings=embeddings,
             metrics=ragas_metrics,
         )
+
+        # Enrich per_query with question item metadata for JSON export
+        raw_per_query = ragas_result.pop("per_query", [])
+        ragas_result["per_query"] = [
+            {
+                "id": item.get("id"),
+                "category": item.get("category", ""),
+                "query": item["question"],
+                "example_answer": item["answer"],
+                "answer": ans,
+                "evaluation": pq,
+            }
+            for item, ans, pq in zip(question_items, answers, raw_per_query)
+        ]
+
+        return ragas_result
 
     # ------------------------------------------------------------------
     # LLM-as-Judge 평가

@@ -189,19 +189,10 @@ def ragas_evaluate(
         contexts   : 각 질문에 대해 검색된 청크 리스트의 리스트
                      예) [["청크1", "청크2"], ["청크3"], ...]
         references : 참조 정답(ground truth) 리스트
-        llm        : RAGAS 가 사용할 LLM 객체.
-                     None 이면 환경변수 OPENAI_API_KEY 로 gpt-4o-mini 자동 사용.
-                     직접 전달 예시:
-                       from langchain_openai import ChatOpenAI
-                       llm = ChatOpenAI(model="gpt-4o-mini")
-                     또는:
-                       from langchain_anthropic import ChatAnthropic
-                       llm = ChatAnthropic(model="claude-3-5-haiku-20241022")
-        embeddings : RAGAS 가 사용할 임베딩 객체 (answer_relevancy, answer_correctness 에 필요).
-                     None 이면 OpenAI text-embedding-3-small 자동 사용.
-                     직접 전달 예시:
-                       from langchain_openai import OpenAIEmbeddings
-                       embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        llm        : RAGAS BaseRagasLLM 객체.
+                     None 이면 OPENAI_API_KEY 환경변수로 ragas llm_factory 자동 사용.
+        embeddings : RAGAS BaseRagasEmbedding 객체 (answer_relevancy, answer_correctness 에 필요).
+                     None 이면 ragas.embeddings.OpenAIEmbeddings 자동 사용.
         metrics    : 계산할 RAGAS Metric 객체 리스트.
                      None 이면 5개 전체(faithfulness, answer_relevancy,
                      context_precision, context_recall, answer_correctness) 사용.
@@ -211,18 +202,6 @@ def ragas_evaluate(
          "context_precision": float, "context_recall": float,
          "answer_correctness": float, "ragas_score": float}
         계산 실패 시 해당 키 값은 None.
-
-    사용 예시:
-        import os
-        os.environ["OPENAI_API_KEY"] = "sk-..."
-
-        result = ragas_evaluate(
-            questions=["봉화군 재난통합관리시스템 예산은?"],
-            answers=["9억 원"],
-            contexts=[["[공고번호: 20240430896 | ...] 봉화군 재난통합관리시스템 고도화 사업..."]],
-            references=["900,000,000원"],
-        )
-        print(result)
     """
     try:
         import warnings
@@ -230,12 +209,12 @@ def ragas_evaluate(
 
         from ragas import evaluate
         from ragas.dataset_schema import SingleTurnSample, EvaluationDataset
-        from ragas.metrics.collections import (
-            faithfulness as _faithfulness,
-            answer_relevancy as _answer_relevancy,
-            context_precision as _context_precision,
-            context_recall as _context_recall,
-            answer_correctness as _answer_correctness,
+        from ragas.metrics import (
+            faithfulness,
+            answer_relevancy,
+            context_precision,
+            context_recall,
+            answer_correctness,
         )
     except ImportError:
         raise ImportError(
@@ -245,19 +224,85 @@ def ragas_evaluate(
 
     if metrics is None:
         metrics = [
-            _faithfulness,
-            _answer_relevancy,
-            _context_precision,
-            _context_recall,
-            _answer_correctness,
+            faithfulness,
+            answer_relevancy,
+            context_precision,
+            context_recall,
+            answer_correctness,
         ]
 
-    # LLM / 임베딩을 각 metric 에 주입
-    for m in metrics:
-        if llm is not None and hasattr(m, "llm"):
-            m.llm = llm
-        if embeddings is not None and hasattr(m, "embeddings"):
-            m.embeddings = embeddings
+    # RAGAS 0.4.x 호환 처리:
+    # - 구형 metric(_answer_relevance)은 langchain 스타일의 embed_query/embed_documents 를 요구
+    # - 신형 metric(collections/)의 async 실행기는 aembed_text/aembed_texts 를 요구
+    # → 두 인터페이스를 모두 구현하는 단일 래퍼를 만들어 주입한다.
+
+    if llm is None:
+        try:
+            import os as _os
+            from openai import AsyncOpenAI as _AsyncOpenAI
+            from ragas.llms import llm_factory as _llm_factory
+            _llm_model = _os.getenv("OPENAI_MODEL", "gpt-5-mini")
+            llm = _llm_factory(_llm_model, client=_AsyncOpenAI())
+        except Exception as _e:
+            warnings.warn(f"RAGAS LLM 자동 생성 실패: {_e}")
+
+    if embeddings is None:
+        try:
+            import os as _os
+            from openai import OpenAI as _OpenAI, AsyncOpenAI as _AsyncOpenAI
+
+            _embed_model = _os.getenv("EMBED_MODEL", "text-embedding-3-small")
+            _sync_client = _OpenAI()
+            _async_client = _AsyncOpenAI()
+
+            class _DualEmbeddings:
+                """embed_query/embed_documents (구형 metric) +
+                   aembed_text/aembed_texts (신형 async metric) 동시 지원."""
+
+                def __init__(self, sync_client, async_client, model):
+                    self._sync = sync_client
+                    self._async = async_client
+                    self.model = model
+
+                # ── 구형 langchain 스타일 ──────────────────────────────
+                def embed_query(self, text: str):
+                    r = self._sync.embeddings.create(input=text, model=self.model)
+                    return r.data[0].embedding
+
+                def embed_documents(self, texts):
+                    r = self._sync.embeddings.create(input=texts, model=self.model)
+                    return [d.embedding for d in r.data]
+
+                # ── 신형 ragas 스타일 (sync) ───────────────────────────
+                def embed_text(self, text: str, **kw):
+                    return self.embed_query(text)
+
+                def embed_texts(self, texts, **kw):
+                    return self.embed_documents(list(texts))
+
+                # ── 신형 ragas 스타일 (async) ──────────────────────────
+                async def aembed_text(self, text: str, **kw):
+                    r = await self._async.embeddings.create(
+                        input=text, model=self.model
+                    )
+                    return r.data[0].embedding
+
+                async def aembed_texts(self, texts, **kw):
+                    r = await self._async.embeddings.create(
+                        input=list(texts), model=self.model
+                    )
+                    return [d.embedding for d in r.data]
+
+            embeddings = _DualEmbeddings(_sync_client, _async_client, _embed_model)
+        except Exception as _e:
+            warnings.warn(f"RAGAS Embeddings 자동 생성 실패: {_e}")
+
+    # 긴 컨텍스트를 잘라 max_tokens InstructorRetryException 방지
+    MAX_CTX_CHARS = 800
+    trimmed_contexts = [
+        [chunk[:MAX_CTX_CHARS] for chunk in ctx_list]
+        for ctx_list in contexts
+    ]
 
     # EvaluationDataset 구성
     samples = [
@@ -267,7 +312,7 @@ def ragas_evaluate(
             retrieved_contexts=ctx,
             reference=ref,
         )
-        for q, a, ctx, ref in zip(questions, answers, contexts, references)
+        for q, a, ctx, ref in zip(questions, answers, trimmed_contexts, references)
     ]
     dataset = EvaluationDataset(samples=samples)
 
@@ -290,13 +335,28 @@ def ragas_evaluate(
     output = {}
     for name in metric_names:
         if name in scores.columns:
-            output[name] = float(scores[name].mean())
+            val = scores[name].mean()
+            import math
+            output[name] = None if math.isnan(val) else float(val)
         else:
             output[name] = None
 
     # RAGAS Score: None 값을 제외한 지표들의 평균
     valid = [v for v in output.values() if v is not None]
     output["ragas_score"] = sum(valid) / len(valid) if valid else None
+
+    # Per-question scores (for JSON export)
+    per_query = []
+    for _, row in scores.iterrows():
+        pq = {}
+        for name in metric_names:
+            if name in scores.columns:
+                val = row[name]
+                pq[name] = None if (isinstance(val, float) and math.isnan(val)) else float(val)
+            else:
+                pq[name] = None
+        per_query.append(pq)
+    output["per_query"] = per_query
 
     return output
 
@@ -360,7 +420,7 @@ def _call_llm(llm, system: str, user: str) -> str:
     # OpenAI client (openai>=1.0)
     if hasattr(llm, "chat"):
         response = llm.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -425,11 +485,11 @@ def llm_judge_evaluate(
     if criteria is None:
         criteria = _ALL_CRITERIA
 
-    # llm 이 None 이면 OpenAI gpt-4o-mini 자동 생성
+    # llm 이 None 이면 OpenAI gpt-5-mini 자동 생성
     if llm is None:
         try:
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+            llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
         except ImportError:
             raise ImportError(
                 "llm=None 으로 사용하려면 langchain-openai 와 OPENAI_API_KEY 가 필요합니다.\n"
