@@ -1,4 +1,4 @@
-# 정확도 올인 하이엔드 버전
+# rag_api_v3.py에 비용 절감, 속도 향상, 토큰 리밋 방어 리팩토링 버전
 
 import math
 import uuid
@@ -51,20 +51,21 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
     extracted_filters = analysis_result.get("filters", {})
 
     # ==================================================
-    # Step 3 & 4: 각 쿼리별 가상 문서 생성 및 하이브리드 필터 검색
+    # Step 3 & 4: 각 쿼리별 하이브리드 필터 검색 (HyDE 제거 버전)
     # ==================================================
     all_candidates = [] # 모든 쿼리에서 찾아온 문서들을 모아둘 임시 바구니
     
     # 쪼개진 쿼리들을 하나씩 순회하며 각각 검색을 돌립니다. (for loop)
     for sq in search_queries:
-        # 1. [HyDE 적용] 각 쿼리에 대해 가상의 완벽한 정답 문서(hyde_doc)를 만들어냅니다.
-        hyde_doc = generate_hyde_document(sq)
+
+        # ❌ [기존 코드 삭제] 가상 문서 생성 생략 (API 호출 비용 및 1~2초 시간 절약)
+        # hyde_doc = generate_hyde_document(sq)
         
         # 2. [하이브리드 검색] FAISS와 BM25를 동시 가동합니다.
-        # - semantic_query: 벡터 검색(FAISS)용. 긴 문맥(hyde_doc)을 넣어 의미를 찾습니다.
+        # - semantic_query: 벡터 검색(FAISS)용. 긴 문맥(sq)을 넣어 의미를 찾습니다.
         # - keyword_query: 키워드 검색(BM25)용. 짧고 명확한 단어(sq)를 넣어 고유명사를 찾습니다.
         candidates = retrieve_candidates(
-            semantic_query=hyde_doc, 
+            semantic_query=sq, 
             keyword_query=sq,
             filters=extracted_filters, # 필터 장착!
             k=10
