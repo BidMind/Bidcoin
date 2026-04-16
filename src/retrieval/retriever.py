@@ -24,10 +24,29 @@ def korean_tokenizer(text: str) -> list[str]:
     except Exception:
         # 에러 발생 시 기본 띄어쓰기 기준으로 대체합니다.
         return str(text).split()
+    
 
 # ==========================================
 # [메인 검색기] 하이브리드 검색 함수
 # ==========================================
+# --- [신규 추가] 필터 검사 함수 ---
+def pass_metadata_filter(metadata: dict, filters: dict) -> bool:
+    """문서의 메타데이터가 필터 조건(발주 기관, 사업명 등)을 포함하는지 검사합니다."""
+    if not filters:
+        return True # 필터가 없으면 무조건 통과
+        
+    for filter_key, filter_val in filters.items():
+        if filter_key in metadata:
+            doc_val = str(metadata[filter_key]).replace(" ", "")
+            target_vals = [v.strip().replace(" ", "") for v in filter_val.split(",")]
+            
+            # 여러 타겟(예: 한영대, 한국대) 중 하나라도 문서 메타데이터에 포함되어 있으면 통과
+            if any(target in doc_val or doc_val in target for target in target_vals):
+                continue
+            return False # 하나라도 매칭 실패 시 즉시 탈락
+    return True
+
+# [수정]
 def retrieve_candidates(semantic_query: str, keyword_query: str, k: int = 10):
     """
     [기능] FAISS(의미)와 BM25(키워드) 검색을 결합한 하이브리드 검색을 수행합니다.
@@ -39,26 +58,30 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, k: int = 10):
     # --------------------------------------------------
     # Step 1. 두 가지 검색 DB 불러오기
     # --------------------------------------------------
+    filters = filters or {}               # 파라미터에 filters: dict 추가
     vector_store = load_db()              # FAISS 벡터 인덱스 로드
     bm25_data = load_bm25()               # BM25 인덱스 데이터 로드
     bm25_engine = bm25_data["bm25_obj"]   # 실제 BM25 검색을 수행할 엔진 객체
     all_docs = bm25_data["docs"]          # 인덱스와 매핑된 원본 문서 리스트
 
-    # RRF(순위 결합)를 제대로 하려면 최종 반환 개수(k)보다 더 많은 후보군을 각각 뽑아와야 합니다.
-    # 10개를 원한다면 각각 20개씩 뽑아서 합친 뒤 상위 10개를 추립니다.
+    # 메타데이터에서 많이 걸러질 것을 대비해 FAISS는 평소보다 3배 더 넉넉히 가져옵니다.
     candidate_k = max(20, k * 2)
+    fetch_k = candidate_k * 3
 
     # --------------------------------------------------
-    # Step 2. [Vector] 의미 기반 검색 (FAISS)
+    # Step 2. [Vector] FAISS 검색 및 필터링
     # --------------------------------------------------
-    # FAISS를 이용해 문맥이 가장 유사한 문서 candidate_k개를 찾습니다.
-    faiss_results = vector_store.similarity_search(semantic_query, k=candidate_k)
-    
-    # 찾은 문서들의 순위(Rank)를 딕셔너리에 저장합니다. (예: "문서A 내용": 1등, "문서B 내용": 2등)
-    faiss_scores = {doc.page_content: rank for rank, doc in enumerate(faiss_results, start=1)}
+    raw_faiss_results = vector_store.similarity_search(semantic_query, k=fetch_k)
+    faiss_scores = {}
+    rank = 1
+    for doc in raw_faiss_results:
+        if pass_metadata_filter(doc.metadata, filters):
+            faiss_scores[doc.page_content] = rank
+            rank += 1
+            if rank > candidate_k: break # 목표 개수 채우면 중단
 
     # --------------------------------------------------
-    # Step 3. [Keyword] 단어 일치 기반 검색 (BM25)
+    # Step 3. [Keyword] BM25 검색 및 필터링
     # --------------------------------------------------
     # 키워드 쿼리를 형태소 분석기로 쪼갭니다.
     tokenized_query = korean_tokenizer(keyword_query)
@@ -70,11 +93,13 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, k: int = 10):
     top_bm25_indices = np.argsort(bm25_raw_scores)[::-1][:candidate_k]
     
     bm25_scores = {}
-    for rank, idx in enumerate(top_bm25_indices, start=1):
+    rank = 1
+    for idx in top_bm25_indices:
         doc = all_docs[idx]
-        # 점수가 0보다 크다는 것은 검색어가 문서에 최소 한 번은 등장했다는 뜻입니다.
-        if bm25_raw_scores[idx] > 0: 
-            bm25_scores[doc.page_content] = rank # FAISS처럼 순위를 저장합니다.
+        if bm25_raw_scores[idx] > 0 and pass_metadata_filter(doc.metadata, filters):
+            bm25_scores[doc.page_content] = rank
+            rank += 1
+            if rank > candidate_k: break
 
     # --------------------------------------------------
     # Step 4. 두 검색 결과 병합 (RRF 점수 계산)

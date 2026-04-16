@@ -40,13 +40,15 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
         }
 
     # ==================================================
-    # Step 2: 질문 재구성 (Multi-Query 분할)
+    # Step 2: Step 2: 질문 분석 (Multi-Query + Metadata Filters)
     # ==================================================
-    search_queries = reformulate_query(query, chat_history)
-    print(f"[Step 2: 질문 재구성] {search_queries}")
+    # 반환형태가 dict로 바뀌었습니다.
+    analysis_result = reformulate_query(query, chat_history)
+    search_queries = analysis_result.get("queries", [query])
+    extracted_filters = analysis_result.get("filters", {})
 
     # ==================================================
-    # Step 3 & 4: 다중 쿼리별 가상 문서 생성 및 하이브리드 검색
+    # Step 3 & 4: 각 쿼리별 가상 문서 생성 및 하이브리드 필터 검색
     # ==================================================
     all_candidates = [] # 모든 쿼리에서 찾아온 문서들을 모아둘 임시 바구니
     
@@ -60,11 +62,12 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
         # - keyword_query: 키워드 검색(BM25)용. 짧고 명확한 단어(sq)를 넣어 고유명사를 찾습니다.
         candidates = retrieve_candidates(
             semantic_query=hyde_doc, 
-            keyword_query=sq, 
+            keyword_query=sq,
+            filters=extracted_filters, # 필터 장착!
             k=10
         )
         all_candidates.extend(candidates) # 찾은 문서들을 바구니에 와르르 쏟아붓습니다.
-        print(f"   [검색 완료] 쿼리 '{sq}' ➡️ 후보 문서 {len(candidates)}개 확보")
+        print(f"   [검색 완료] 쿼리 '{sq}' ➡️ 필터링된 후보 문서 {len(candidates)}개 확보")
 
     # [중복 제거 로직]
     # "A 정보" 검색과 "B 정보" 검색이 우연히 같은 PDF 파일을 가져올 수 있습니다.
