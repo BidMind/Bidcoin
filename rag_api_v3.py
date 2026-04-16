@@ -13,6 +13,7 @@ from src.retrieval.retriever import retrieve_candidates
 from src.retrieval.reranker_debug import rerank_and_score
 
 SCORE_THRESHOLD = 0.6  # 랭킹 점수 임계값
+PASS_THROUGH_THRESHOLD = 0.85 # 프리패스 기준 점수
 
 def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
@@ -126,15 +127,24 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
         print(f"    [압축 성공] {source_file} ({len(original_text)}자 ➡️ {len(compressed_text)}자)")
 
     # ==================================================
-    # Step 6: 자가 반성 (Self-RAG Evaluator)
+    # Step 6: 자가 반성 (Self-RAG Evaluator) 및 가드레일 프리패스
     # ==================================================
     if contexts:
-        print(f"[Step 6: 자가 반성] 최종 팩트 체크 진행 중...")
-        if not evaluate_contexts(combined_search_query, contexts):
-            print("    [Self-RAG 경고] 문서 보강 필요. 환각 방지를 위해 결과 초기화.")
-            contexts = []
+        # 압축을 통과한 문서들 중 가장 높은 신뢰도 점수를 찾습니다.
+        max_score = max(c["score"] for c in contexts)
+        
+        # [프리패스 발동 조건] 최고 점수가 기준치를 넘었는가?
+        if max_score >= PASS_THROUGH_THRESHOLD:
+            print(f"🚀 [Step 6: 프리패스 발동] 최고 신뢰도 달성 ({max_score} >= {PASS_THROUGH_THRESHOLD})")
+            print("   ✅ 확정적 정답으로 간주하여 LLM 팩트 검증을 생략하고 속도를 극대화합니다.")
         else:
-            print("   ✅ [Self-RAG 통과] 팩트 검증 완료.")
+            # 기준치 미달 시 평소대로 검열관을 호출합니다.
+            print(f"[Step 6: 자가 반성] 최고 신뢰도({max_score}) 안정권 미달. 팩트 체크를 진행합니다...")
+            if not evaluate_contexts(combined_search_query, contexts):
+                print("    [Self-RAG 경고] 문서 보강 필요. 환각 방지를 위해 결과 초기화.")
+                contexts = []
+            else:
+                print("   ✅ [Self-RAG 통과] 팩트 검증 완료.")
     else:
         print(f" [Step 6: 자가 반성] 전달할 문서가 없어 검열 생략.")
 
