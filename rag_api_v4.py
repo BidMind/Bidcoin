@@ -103,40 +103,25 @@ def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = N
     # Step 5: 문맥 압축 및 필터링 (Context Compression)
     # ==================================================
     contexts = []
-    print(f"[Step 5: 문맥 압축 가동] 비동기 병렬 처리 시작...")
+    print(f"[Step 5: 문맥 포장] LLM 압축 생략. 원본 텍스트 직접 전달...")
 
-    # 1. 각각의 스레드(작업자)가 실행할 단일 압축 함수 정의
-    def _compress_worker(doc_info):
-        score, doc = doc_info
+    for score, doc in top_docs:
         if score < SCORE_THRESHOLD:
-            return None
+            continue
             
-        original_text = doc.page_content
-        # LLM API 호출 지점 
-        compressed_text = compress_document(combined_search_query, original_text)
+        original_text = doc.page_content  
         
-        if compressed_text == "PASS":
-            return None    
-        
-        return {
+        contexts.append({
             "chunk_id": f"bid_{uuid.uuid4().hex[:8]}",
-            "text": compressed_text,
+            "text": original_text, # 압축하지 않고 원본 그대로 통과!
             "source_file": doc.metadata.get("source", "unknown"),
             "organization": doc.metadata.get("발주 기관", "알 수 없음"),
             "project_name": doc.metadata.get("사업명", "알 수 없음"),
-            "summary": compressed_text[:100].replace("\n", " ") + "...",
+            "summary": original_text[:100].replace("\n", " ") + "...",
             "score": math.trunc(score * 100) / 100
-        }
-
-    # 2. 최대 5명의 작업자(Thread)를 고용하여 동시에 쫙 뿌립니다.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        # map 함수를 사용해 top_docs의 문서들을 _compress_worker에 병렬로 던집니다.
-        results = list(executor.map(_compress_worker, top_docs))
-
-    # 3. None 값(임계값 미달 또는 PASS된 문서)을 깔끔하게 제거합니다.
-    contexts = [res for res in results if res is not None]
+        })
     
-    print(f"    [압축 성공] 병렬 처리 완료. 최종 유효 문서 {len(contexts)}개 추출")        
+    print(f"[포장 완료] 최종 유효 문서 {len(contexts)}개 추출")        
 
     # ==================================================
     # Step 6: 자가 반성 (Self-RAG Evaluator) 및 가드레일 프리패스
