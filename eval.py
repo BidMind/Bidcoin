@@ -1,10 +1,9 @@
 # eval.py — RAG 파이프라인 평가 실행 스크립트
 #
 # 사용법:
-#   python eval.py                      → question_sets.py 전체 질문으로 3가지 평가 모두 실행 (기본)
+#   python eval.py                      → question_sets.py 전체 질문으로 2가지 평가 모두 실행 (기본)
 #   python eval.py --category fact      → 특정 카테고리만 평가
 #   python eval.py --basic              → 기본 평가만 (빠름, LLM 불필요)
-#   python eval.py --ragas              → RAGAS 평가만
 #   python eval.py --judge              → LLM-as-Judge 평가만
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import argparse
 import json
 from datetime import datetime
 
-from rag_api_v3 import get_rag_context
+from rag_api_v4 import get_rag_context
 #from rag_api import get_rag_context
 from src.generation.generator import BidCoinGenerator
 from src.generation.schemas import RetrievedContext, RetrievalResult
@@ -32,6 +31,13 @@ def _get_generator() -> BidCoinGenerator:
 
 # ─── Evaluator 래퍼 함수 ─────────────────────────────────────────────────────
 
+# retriever 가 가져온 전체 메타데이터를 generator 에서 재사용하기 위한 캐시.
+# Evaluator 는 generator 에 text 문자열만 전달하므로 source_file 등 메타데이터가
+# 중간에 유실된다. retriever 호출 시 원본 컨텍스트를 여기에 저장해 두고
+# generator 에서 꺼내 쓰면 source_file 이 항상 "eval" 로 고정되는 문제가 해결된다.
+_retrieval_cache: dict[str, list[dict]] = {}
+
+
 def _retriever(query: str) -> list[dict]:
     """
     Evaluator가 요구하는 retriever 시그니처 래퍼.
@@ -39,14 +45,17 @@ def _retriever(query: str) -> list[dict]:
 
     question_sets.py 의 question 을 그대로 RAG 파이프라인에 전달하고,
     반환된 contexts 의 source_file 을 id 로 사용한다.
+    전체 메타데이터는 _retrieval_cache 에 보존해 generator 에서 재사용한다.
     """
     raw = get_rag_context(query, [])
+    full_contexts = raw.get("contexts", [])
+    _retrieval_cache[query] = full_contexts          # 메타데이터 보존
     return [
         {
             "id":   ctx.get("source_file", ctx.get("chunk_id", "unknown")),
             "text": ctx.get("text", ""),
         }
-        for ctx in raw.get("contexts", [])
+        for ctx in full_contexts
     ]
 
 
@@ -55,9 +64,25 @@ def _generator(query: str, contexts: list[str]) -> str:
     Evaluator가 요구하는 generator 시그니처 래퍼.
       (query: str, contexts: List[str]) -> str
 
-    retriever 가 반환한 contexts 를 받아 생성 단계만 실행한다.
+    _retriever 가 캐시해 둔 원본 메타데이터를 활용해 RetrievedContext 를 복원한다.
+    캐시가 없을 경우(안전망)에만 text 만으로 객체를 생성한다.
     """
-    ctx_objs = [RetrievedContext(text=t, source_file="eval") for t in contexts]
+    full_contexts = _retrieval_cache.get(query, [])
+    if full_contexts:
+        ctx_objs = [
+            RetrievedContext(
+                text=ctx.get("text", ""),
+                source_file=ctx.get("source_file", "unknown"),
+                chunk_id=ctx.get("chunk_id"),
+                organization=ctx.get("organization"),
+                project_name=ctx.get("project_name"),
+                summary=ctx.get("summary"),
+                score=ctx.get("score"),
+            )
+            for ctx in full_contexts
+        ]
+    else:
+        ctx_objs = [RetrievedContext(text=t, source_file="unknown") for t in contexts]
     retrieval_result = RetrievalResult(question=query, contexts=ctx_objs)
     return _get_generator().generate(retrieval_result).answer
 
@@ -74,7 +99,7 @@ def _write_json(data: object, path: str) -> None:
 
 def run_basic(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
     print("\n" + "="*60)
-    print("  [1/3] 기본 평가  (Hit Rate / Precision / Recall / MRR / NDCG / F1 / Faithfulness)")
+    print("  [1/2] 기본 평가  (Hit Rate / Precision / Recall / MRR / NDCG / F1 / Faithfulness)")
     print("="*60)
     results = evaluator.run(question_items)
     Evaluator.print_report(results)
@@ -100,20 +125,10 @@ def run_basic(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
     ]
 
 
-def run_ragas(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
-    print("\n" + "="*60)
-    print("  [2/3] RAGAS 평가  (Faithfulness / Answer Relevancy / Context Precision·Recall / Correctness)")
-    print("="*60)
-    scores = evaluator.run_ragas(question_items)
-    Evaluator.print_ragas_report(scores)
-    # per_query already enriched with id/category/query/example_answer/answer in evaluator.run_ragas()
-    return scores.get("per_query", [])
-
-
 def run_judge(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
-    print("\n" + "="*60)
-    print("  [3/3] LLM-as-Judge 평가  (Relevance / Faithfulness / Correctness / Completeness)")
-    print("="*60)
+    print("\n" + "="*70)
+    print("  [2/2] LLM-as-Judge 평가  (Relevance / Faithfulness / Correctness / Completeness / Context Precision·Recall)")
+    print("="*70)
     scores = evaluator.run_llm_judge(question_items)
     Evaluator.print_llm_judge_report(scores)
 
@@ -125,11 +140,13 @@ def run_judge(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
             "example_answer": item["answer"],
             "answer":         pq.get("answer"),
             "evaluation": {
-                "relevance":    pq.get("relevance"),
-                "faithfulness": pq.get("faithfulness"),
-                "correctness":  pq.get("correctness"),
-                "completeness": pq.get("completeness"),
-                "reason":       pq.get("reason"),
+                "relevance":         pq.get("relevance"),
+                "faithfulness":      pq.get("faithfulness"),
+                "correctness":       pq.get("correctness"),
+                "completeness":      pq.get("completeness"),
+                "context_precision": pq.get("context_precision"),
+                "context_recall":    pq.get("context_recall"),
+                "reason":            pq.get("reason"),
             },
         }
         for item, pq in zip(question_items, scores.get("per_query", []))
@@ -141,7 +158,6 @@ def run_judge(evaluator: Evaluator, question_items: list[dict]) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="BidCoin RAG 파이프라인 평가")
     parser.add_argument("--basic",    action="store_true", help="기본 평가만 실행 (빠름, LLM 불필요)")
-    parser.add_argument("--ragas",    action="store_true", help="RAGAS 평가만 실행")
     parser.add_argument("--judge",    action="store_true", help="LLM-as-Judge 평가만 실행")
     parser.add_argument("--category", type=str, default=None,
                         help="특정 카테고리만 평가 (fact / condition / summary / compare / recommend / follow_up / refusal / evidence / complex)")
@@ -163,23 +179,19 @@ def main() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = args.output or f"eval_results_{timestamp}.json"
 
-    # 단일 모드 플래그가 있으면 해당 평가만, 없으면 3가지 모두 실행
+    # 단일 모드 플래그가 있으면 해당 평가만, 없으면 2가지 모두 실행
     if args.basic:
         records = run_basic(evaluator, question_items)
-        _write_json(records, output_path)
-    elif args.ragas:
-        records = run_ragas(evaluator, question_items)
         _write_json(records, output_path)
     elif args.judge:
         records = run_judge(evaluator, question_items)
         _write_json(records, output_path)
     else:
-        # 기본: 3가지 평가 모두 실행 후 eval_type별로 묶어 저장
+        # 기본: basic + LLM-as-Judge 실행 후 eval_type별로 묶어 저장
         basic_records = run_basic(evaluator, question_items)
-        ragas_records = run_ragas(evaluator, question_items)
         judge_records = run_judge(evaluator, question_items)
         _write_json(
-            {"basic": basic_records, "ragas": ragas_records, "judge": judge_records},
+            {"basic": basic_records, "judge": judge_records},
             output_path,
         )
 

@@ -11,11 +11,7 @@ evaluator.py — RAG 파이프라인 평가 실행기
     results = evaluator.run(get_all())
     evaluator.print_report(results)
 
-    # RAGAS 평가 (LLM 필요)
-    ragas_scores = evaluator.run_ragas(get_all())
-    print(ragas_scores)
-
-    # LLM-as-Judge 평가 (LLM 필요)
+    # LLM-as-Judge 평가 (LLM 필요, RAGAS 6개 지표 대응)
     judge_scores = evaluator.run_llm_judge(get_all())
     evaluator.print_llm_judge_report(judge_scores)
 
@@ -208,94 +204,7 @@ class Evaluator:
         return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
-    # RAGAS 평가 (LLM 필요)
-    # ------------------------------------------------------------------
-
-    def run_ragas(
-        self,
-        question_items: Optional[List[dict]] = None,
-        category: Optional[str] = None,
-        llm=None,
-        embeddings=None,
-        ragas_metrics: Optional[List] = None,
-    ) -> dict:
-        """
-        RAGAS 5개 지표를 계산한다. generator 가 반드시 설정되어 있어야 한다.
-
-        Args:
-            question_items : 평가할 질문 리스트. None 이면 전체 질문 셋 사용.
-            category       : 특정 카테고리만 평가하고 싶을 때 지정.
-            llm            : RAGAS LLM 객체. None 이면 OPENAI_API_KEY 환경변수로 자동 설정.
-                             예) from langchain_openai import ChatOpenAI
-                                 llm = ChatOpenAI(model="gpt-4o-mini")
-                             예) from langchain_anthropic import ChatAnthropic
-                                 llm = ChatAnthropic(model="claude-3-5-haiku-20241022")
-            embeddings     : RAGAS 임베딩 객체. None 이면 OpenAI 임베딩 자동 사용.
-            ragas_metrics  : 계산할 RAGAS Metric 리스트. None 이면 5개 전체 사용.
-
-        Returns:
-            {"faithfulness": float, "answer_relevancy": float,
-             "context_precision": float, "context_recall": float,
-             "answer_correctness": float, "ragas_score": float}
-
-        사용 예시:
-            import os
-            os.environ["OPENAI_API_KEY"] = "sk-..."
-
-            evaluator = Evaluator(retriever=my_retriever, generator=my_generator)
-            ragas_scores = evaluator.run_ragas()
-            print(ragas_scores)
-        """
-        if self.generator is None:
-            raise ValueError(
-                "run_ragas() 는 generator 가 필요합니다.\n"
-                "Evaluator(retriever=..., generator=my_generator) 로 초기화하세요."
-            )
-
-        if question_items is None:
-            question_items = get_by_category(category) if category else get_all()
-
-        questions, answers, contexts, references = [], [], [], []
-
-        for item in question_items:
-            query = item["question"]
-            retrieved = self.retriever(query)[: self.top_k]
-            ctx_chunks = [r["text"] for r in retrieved]
-            answer = self.generator(query, ctx_chunks)
-
-            questions.append(query)
-            answers.append(answer)
-            contexts.append(ctx_chunks)
-            references.append(item["answer"])
-
-        ragas_result = M.ragas_evaluate(
-            questions=questions,
-            answers=answers,
-            contexts=contexts,
-            references=references,
-            llm=llm,
-            embeddings=embeddings,
-            metrics=ragas_metrics,
-        )
-
-        # Enrich per_query with question item metadata for JSON export
-        raw_per_query = ragas_result.pop("per_query", [])
-        ragas_result["per_query"] = [
-            {
-                "id": item.get("id"),
-                "category": item.get("category", ""),
-                "query": item["question"],
-                "example_answer": item["answer"],
-                "answer": ans,
-                "evaluation": pq,
-            }
-            for item, ans, pq in zip(question_items, answers, raw_per_query)
-        ]
-
-        return ragas_result
-
-    # ------------------------------------------------------------------
-    # LLM-as-Judge 평가
+    # LLM-as-Judge 평가 (RAGAS 6개 지표 대응)
     # ------------------------------------------------------------------
 
     def run_llm_judge(
@@ -307,6 +216,7 @@ class Evaluator:
     ) -> dict:
         """
         LLM-as-Judge 방식으로 생성 답변 품질을 평가한다.
+        RAGAS 5개 지표에 대응하는 6개 기준을 단일 LLM 호출로 안정적으로 채점한다.
         generator 가 반드시 설정되어 있어야 한다.
 
         Args:
@@ -317,17 +227,20 @@ class Evaluator:
                                  llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
                              예) from langchain_anthropic import ChatAnthropic
                                  llm = ChatAnthropic(model="claude-3-5-haiku-20241022", temperature=0)
-            criteria       : 집계할 기준 리스트. None 이면 4개 전체.
-                             ["relevance", "faithfulness", "correctness", "completeness"]
+            criteria       : 집계할 기준 리스트. None 이면 6개 전체.
+                             ["relevance", "faithfulness", "correctness", "completeness",
+                              "context_precision", "context_recall"]
 
         Returns:
             {
-                "relevance":    float,      # 0.0 ~ 1.0
-                "faithfulness": float,
-                "correctness":  float,
-                "completeness": float,
-                "judge_score":  float,      # 기준 지표 평균
-                "per_query":    List[dict]  # 질문별 점수 및 이유
+                "relevance":         float,   # 0.0 ~ 1.0  (↔ RAGAS answer_relevancy)
+                "faithfulness":      float,   #             (↔ RAGAS faithfulness)
+                "correctness":       float,   #             (↔ RAGAS answer_correctness)
+                "completeness":      float,   #             (↔ RAGAS answer_correctness 보완)
+                "context_precision": float,   #             (↔ RAGAS context_precision)
+                "context_recall":    float,   #             (↔ RAGAS context_recall)
+                "judge_score":       float,   # 기준 지표 평균
+                "per_query":         List[dict]  # 질문별 점수 및 이유
             }
 
         사용 예시:
@@ -372,15 +285,17 @@ class Evaluator:
     @staticmethod
     def print_llm_judge_report(judge_scores: dict) -> None:
         """run_llm_judge() 결과를 콘솔에 출력한다."""
-        print("=" * 60)
-        print("  LLM-as-Judge 평가 결과")
-        print("=" * 60)
+        print("=" * 70)
+        print("  LLM-as-Judge 평가 결과  (RAGAS 6개 지표 대응)")
+        print("=" * 70)
         labels = {
-            "relevance":    "Relevance    (관련성)",
-            "faithfulness": "Faithfulness (충실성)",
-            "correctness":  "Correctness  (정확성)",
-            "completeness": "Completeness (완전성)",
-            "judge_score":  "Judge Score  (종합)",
+            "relevance":         "Relevance         (관련성)       ↔ answer_relevancy",
+            "faithfulness":      "Faithfulness      (충실성)       ↔ faithfulness",
+            "correctness":       "Correctness       (정확성)       ↔ answer_correctness",
+            "completeness":      "Completeness      (완전성)       ↔ answer_correctness+",
+            "context_precision": "Context Precision (컨텍스트 정밀도) ↔ context_precision",
+            "context_recall":    "Context Recall    (컨텍스트 재현율) ↔ context_recall",
+            "judge_score":       "Judge Score       (종합)",
         }
         for key, label in labels.items():
             val = judge_scores.get(key)
@@ -389,42 +304,23 @@ class Evaluator:
 
         per_query = judge_scores.get("per_query", [])
         if per_query:
-            print("-" * 60)
+            print("-" * 70)
             print("  질문별 상세 점수:")
             for i, row in enumerate(per_query, 1):
-                q_short = row["question"][:40]
+                q_short = row["question"][:35]
                 if row.get("error"):
                     print(f"  {i:>2}. [{q_short}] ERROR: {row['error']}")
                 else:
-                    r = row.get("relevance")
-                    f = row.get("faithfulness")
-                    c = row.get("correctness")
-                    m = row.get("completeness")
                     fmt = lambda v: f"{v:.2f}" if v is not None else " N/A"
                     print(
-                        f"  {i:>2}. Rel={fmt(r)} Fai={fmt(f)} "
-                        f"Cor={fmt(c)} Com={fmt(m)}  {q_short}"
+                        f"  {i:>2}. Rel={fmt(row.get('relevance'))} "
+                        f"Fai={fmt(row.get('faithfulness'))} "
+                        f"Cor={fmt(row.get('correctness'))} "
+                        f"Com={fmt(row.get('completeness'))} "
+                        f"CP={fmt(row.get('context_precision'))} "
+                        f"CR={fmt(row.get('context_recall'))}  "
+                        f"{q_short}"
                     )
                     if row.get("reason"):
                         print(f"       └ {row['reason']}")
-        print("=" * 60)
-
-    @staticmethod
-    def print_ragas_report(ragas_scores: dict) -> None:
-        """run_ragas() 결과를 콘솔에 출력한다."""
-        print("=" * 60)
-        print("  RAGAS 평가 결과")
-        print("=" * 60)
-        labels = {
-            "faithfulness":       "Faithfulness      (충실성)",
-            "answer_relevancy":   "Answer Relevancy  (답변 관련성)",
-            "context_precision":  "Context Precision (컨텍스트 정밀도)",
-            "context_recall":     "Context Recall    (컨텍스트 재현율)",
-            "answer_correctness": "Answer Correctness(답변 정확도)",
-            "ragas_score":        "RAGAS Score       (종합)",
-        }
-        for key, label in labels.items():
-            val = ragas_scores.get(key)
-            val_str = f"{val:.4f}" if val is not None else "N/A"
-            print(f"  {label}: {val_str}")
-        print("=" * 60)
+        print("=" * 70)
