@@ -13,14 +13,14 @@ metrics.py — RAG 평가 지표 계산 모듈
     - token_overlap_f1  : 생성 답변과 참조 답변 간 토큰 F1 (어휘 기반)
     - answer_in_context : 참조 정답이 검색된 컨텍스트 내에 포함되는지 여부 (Faithfulness 근사)
 
-  [RAGAS — LLM 필요]
-    - ragas_evaluate    : RAGAS 공식 라이브러리로 5개 지표 동시 계산
-                          faithfulness / answer_relevancy / context_precision
-                          context_recall / answer_correctness
-
   [LLM-as-Judge — LLM 필요]
-    - llm_judge_evaluate : LLM이 직접 채점하는 4개 지표 동시 계산
-                           relevance / faithfulness / correctness / completeness
+    - llm_judge_evaluate : LLM이 직접 채점하는 6개 지표 동시 계산
+                           relevance        (answer_relevancy 대응)
+                           faithfulness     (faithfulness 대응)
+                           correctness      (answer_correctness 대응)
+                           completeness     (answer_correctness 보완)
+                           context_precision(context_precision 대응)
+                           context_recall   (context_recall 대응)
 """
 
 from __future__ import annotations
@@ -168,200 +168,6 @@ def aggregate_metrics(results: List[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# RAGAS 지표 (LLM 필요)
-# ---------------------------------------------------------------------------
-
-def ragas_evaluate(
-    questions: List[str],
-    answers: List[str],
-    contexts: List[List[str]],
-    references: List[str],
-    llm=None,
-    embeddings=None,
-    metrics: Optional[List] = None,
-) -> dict:
-    """
-    RAGAS 공식 라이브러리를 사용해 5개 지표를 계산한다.
-
-    Args:
-        questions  : 질문 문자열 리스트
-        answers    : 생성된 답변 리스트 (질문과 1:1 대응)
-        contexts   : 각 질문에 대해 검색된 청크 리스트의 리스트
-                     예) [["청크1", "청크2"], ["청크3"], ...]
-        references : 참조 정답(ground truth) 리스트
-        llm        : RAGAS BaseRagasLLM 객체.
-                     None 이면 OPENAI_API_KEY 환경변수로 ragas llm_factory 자동 사용.
-        embeddings : RAGAS BaseRagasEmbedding 객체 (answer_relevancy, answer_correctness 에 필요).
-                     None 이면 ragas.embeddings.OpenAIEmbeddings 자동 사용.
-        metrics    : 계산할 RAGAS Metric 객체 리스트.
-                     None 이면 5개 전체(faithfulness, answer_relevancy,
-                     context_precision, context_recall, answer_correctness) 사용.
-
-    Returns:
-        {"faithfulness": float, "answer_relevancy": float,
-         "context_precision": float, "context_recall": float,
-         "answer_correctness": float, "ragas_score": float}
-        계산 실패 시 해당 키 값은 None.
-    """
-    try:
-        import warnings
-        warnings.filterwarnings("ignore")
-
-        from ragas import evaluate
-        from ragas.dataset_schema import SingleTurnSample, EvaluationDataset
-        from ragas.metrics import (
-            faithfulness,
-            answer_relevancy,
-            context_precision,
-            context_recall,
-            answer_correctness,
-        )
-    except ImportError:
-        raise ImportError(
-            "ragas 가 설치되어 있지 않습니다.\n"
-            "  pip install ragas"
-        )
-
-    if metrics is None:
-        metrics = [
-            faithfulness,
-            answer_relevancy,
-            context_precision,
-            context_recall,
-            answer_correctness,
-        ]
-
-    # RAGAS 0.4.x 호환 처리:
-    # - 구형 metric(_answer_relevance)은 langchain 스타일의 embed_query/embed_documents 를 요구
-    # - 신형 metric(collections/)의 async 실행기는 aembed_text/aembed_texts 를 요구
-    # → 두 인터페이스를 모두 구현하는 단일 래퍼를 만들어 주입한다.
-
-    if llm is None:
-        try:
-            import os as _os
-            from openai import AsyncOpenAI as _AsyncOpenAI
-            from ragas.llms import llm_factory as _llm_factory
-            _llm_model = _os.getenv("OPENAI_MODEL", "gpt-5-mini")
-            llm = _llm_factory(_llm_model, client=_AsyncOpenAI())
-        except Exception as _e:
-            warnings.warn(f"RAGAS LLM 자동 생성 실패: {_e}")
-
-    if embeddings is None:
-        try:
-            import os as _os
-            from openai import OpenAI as _OpenAI, AsyncOpenAI as _AsyncOpenAI
-
-            _embed_model = _os.getenv("EMBED_MODEL", "text-embedding-3-small")
-            _sync_client = _OpenAI()
-            _async_client = _AsyncOpenAI()
-
-            class _DualEmbeddings:
-                """embed_query/embed_documents (구형 metric) +
-                   aembed_text/aembed_texts (신형 async metric) 동시 지원."""
-
-                def __init__(self, sync_client, async_client, model):
-                    self._sync = sync_client
-                    self._async = async_client
-                    self.model = model
-
-                # ── 구형 langchain 스타일 ──────────────────────────────
-                def embed_query(self, text: str):
-                    r = self._sync.embeddings.create(input=text, model=self.model)
-                    return r.data[0].embedding
-
-                def embed_documents(self, texts):
-                    r = self._sync.embeddings.create(input=texts, model=self.model)
-                    return [d.embedding for d in r.data]
-
-                # ── 신형 ragas 스타일 (sync) ───────────────────────────
-                def embed_text(self, text: str, **kw):
-                    return self.embed_query(text)
-
-                def embed_texts(self, texts, **kw):
-                    return self.embed_documents(list(texts))
-
-                # ── 신형 ragas 스타일 (async) ──────────────────────────
-                async def aembed_text(self, text: str, **kw):
-                    r = await self._async.embeddings.create(
-                        input=text, model=self.model
-                    )
-                    return r.data[0].embedding
-
-                async def aembed_texts(self, texts, **kw):
-                    r = await self._async.embeddings.create(
-                        input=list(texts), model=self.model
-                    )
-                    return [d.embedding for d in r.data]
-
-            embeddings = _DualEmbeddings(_sync_client, _async_client, _embed_model)
-        except Exception as _e:
-            warnings.warn(f"RAGAS Embeddings 자동 생성 실패: {_e}")
-
-    # 긴 컨텍스트를 잘라 max_tokens InstructorRetryException 방지
-    MAX_CTX_CHARS = 800
-    trimmed_contexts = [
-        [chunk[:MAX_CTX_CHARS] for chunk in ctx_list]
-        for ctx_list in contexts
-    ]
-
-    # EvaluationDataset 구성
-    samples = [
-        SingleTurnSample(
-            user_input=q,
-            response=a,
-            retrieved_contexts=ctx,
-            reference=ref,
-        )
-        for q, a, ctx, ref in zip(questions, answers, trimmed_contexts, references)
-    ]
-    dataset = EvaluationDataset(samples=samples)
-
-    # 평가 실행
-    result = evaluate(
-        dataset=dataset,
-        metrics=metrics,
-        llm=llm,
-        embeddings=embeddings,
-        raise_exceptions=False,
-        show_progress=True,
-    )
-
-    scores = result.to_pandas()
-    metric_names = [
-        "faithfulness", "answer_relevancy",
-        "context_precision", "context_recall", "answer_correctness",
-    ]
-
-    output = {}
-    for name in metric_names:
-        if name in scores.columns:
-            val = scores[name].mean()
-            import math
-            output[name] = None if math.isnan(val) else float(val)
-        else:
-            output[name] = None
-
-    # RAGAS Score: None 값을 제외한 지표들의 평균
-    valid = [v for v in output.values() if v is not None]
-    output["ragas_score"] = sum(valid) / len(valid) if valid else None
-
-    # Per-question scores (for JSON export)
-    per_query = []
-    for _, row in scores.iterrows():
-        pq = {}
-        for name in metric_names:
-            if name in scores.columns:
-                val = row[name]
-                pq[name] = None if (isinstance(val, float) and math.isnan(val)) else float(val)
-            else:
-                pq[name] = None
-        per_query.append(pq)
-    output["per_query"] = per_query
-
-    return output
-
-
-# ---------------------------------------------------------------------------
 # LLM-as-Judge 지표 (LLM 필요)
 # ---------------------------------------------------------------------------
 
@@ -382,19 +188,28 @@ _JUDGE_USER_PROMPT = """\
 **검색된 컨텍스트:**
 {context}
 
-아래 기준에 따라 각 항목을 1~5점으로 평가하세요.
-- relevance   (관련성): 답변이 질문에 적절히 답하고 있는가?
-- faithfulness(충실성): 답변이 제공된 컨텍스트에 근거하고 있는가?
-- correctness (정확성): 답변이 참조 정답과 일치하는가?
-- completeness(완전성): 답변이 참조 정답의 핵심 정보를 모두 포함하는가?
+아래 6가지 기준에 따라 각 항목을 1~5점으로 평가하세요.
+
+[답변 품질]
+- relevance        (관련성):         답변이 질문에 직접적으로 답하고 있는가?
+- faithfulness     (충실성):         답변의 모든 주장이 검색된 컨텍스트에 근거하는가? 컨텍스트에 없는 내용을 지어냈다면 감점.
+- correctness      (정확성):         답변이 참조 정답의 핵심 사실과 일치하는가?
+- completeness     (완전성):         답변이 참조 정답의 모든 핵심 정보를 빠짐없이 포함하는가?
+
+[검색 품질]
+- context_precision(컨텍스트 정밀도): 검색된 컨텍스트 청크들이 질문 답변에 실제로 유용한가? 무관한 청크가 많을수록 감점.
+- context_recall   (컨텍스트 재현율): 참조 정답을 도출하는 데 필요한 핵심 정보가 검색된 컨텍스트에 모두 있는가?
 
 점수 기준: 1=매우나쁨, 2=나쁨, 3=보통, 4=좋음, 5=매우좋음
 
 반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
-{{"relevance": <1-5>, "faithfulness": <1-5>, "correctness": <1-5>, "completeness": <1-5>, "reason": "<한 문장 이유>"}}\
+{{"relevance": <1-5>, "faithfulness": <1-5>, "correctness": <1-5>, "completeness": <1-5>, "context_precision": <1-5>, "context_recall": <1-5>, "reason": "<한 문장 이유>"}}\
 """
 
-_ALL_CRITERIA = ["relevance", "faithfulness", "correctness", "completeness"]
+_ALL_CRITERIA = [
+    "relevance", "faithfulness", "correctness", "completeness",
+    "context_precision", "context_recall",
+]
 
 
 def _parse_judge_response(text: str) -> dict:
@@ -441,10 +256,18 @@ def llm_judge_evaluate(
     criteria: Optional[List[str]] = None,
 ) -> dict:
     """
-    LLM-as-Judge 방식으로 생성 답변의 품질을 평가한다.
+    LLM-as-Judge 방식으로 생성 답변과 검색 품질을 평가한다.
 
-    LLM이 각 답변을 직접 1~5점으로 채점하므로 어휘 기반 지표보다
-    의미론적 정확도를 더 잘 반영한다.
+    RAGAS 5개 지표에 대응하는 6개 기준을 단일 LLM 호출로 채점한다.
+    어휘 기반 지표와 달리 한국어 구조화 답변에서도 안정적으로 동작한다.
+
+    지표 대응표:
+        relevance         ↔  RAGAS answer_relevancy
+        faithfulness      ↔  RAGAS faithfulness
+        correctness       ↔  RAGAS answer_correctness (핵심 사실 일치)
+        completeness      ↔  RAGAS answer_correctness (누락 정보)
+        context_precision ↔  RAGAS context_precision
+        context_recall    ↔  RAGAS context_recall
 
     Args:
         questions  : 질문 문자열 리스트
@@ -457,17 +280,20 @@ def llm_judge_evaluate(
                          llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
                      예) from langchain_anthropic import ChatAnthropic
                          llm = ChatAnthropic(model="claude-3-5-haiku-20241022", temperature=0)
-        criteria   : 집계에 포함할 기준 리스트. None 이면 4개 전체.
-                     ["relevance", "faithfulness", "correctness", "completeness"]
+        criteria   : 집계에 포함할 기준 리스트. None 이면 6개 전체.
+                     ["relevance", "faithfulness", "correctness", "completeness",
+                      "context_precision", "context_recall"]
 
     Returns:
         {
-            "relevance":    float,      # 0.0 ~ 1.0 (1~5점 → /5 정규화)
-            "faithfulness": float,
-            "correctness":  float,
-            "completeness": float,
-            "judge_score":  float,      # criteria 지표들의 평균
-            "per_query":    List[dict]  # 질문별 원시 점수 및 이유
+            "relevance":         float,   # 0.0 ~ 1.0 (1~5점 → /5 정규화)
+            "faithfulness":      float,
+            "correctness":       float,
+            "completeness":      float,
+            "context_precision": float,
+            "context_recall":    float,
+            "judge_score":       float,   # criteria 지표들의 평균
+            "per_query":         List[dict]  # 질문별 원시 점수 및 이유
         }
 
     사용 예시:
@@ -480,7 +306,8 @@ def llm_judge_evaluate(
             contexts=[["봉화군 재난통합관리시스템 고도화 사업 예산: 900,000,000원 ..."]],
             references=["900,000,000원"],
         )
-        # {"relevance": 1.0, "faithfulness": 0.9, "correctness": 0.9, ...}
+        # {"relevance": 1.0, "faithfulness": 0.9, "correctness": 0.9,
+        #  "context_precision": 1.0, "context_recall": 1.0, ...}
     """
     if criteria is None:
         criteria = _ALL_CRITERIA
