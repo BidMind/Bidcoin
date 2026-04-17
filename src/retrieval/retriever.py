@@ -85,6 +85,7 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict =
     # --------------------------------------------------
     # 키워드 쿼리를 형태소 분석기로 쪼갭니다.
     tokenized_query = korean_tokenizer(keyword_query)
+    print(f"[DEBUG][BM25 토큰] {tokenized_query}") 
     
     # BM25 엔진에 넣어 각 문서별 키워드 매칭 점수(배열)를 얻습니다.
     bm25_raw_scores = bm25_engine.get_scores(tokenized_query)
@@ -123,8 +124,13 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict =
         
         # RRF 공식: (1 / (60 + FAISS순위)) + (1 / (60 + BM25순위))
         # 두 엔진에서 모두 상위권에 있을수록 점수가 기하급수적으로 높아집니다.
-        rrf_score = (1 / (k_rrf + f_rank)) + (1 / (k_rrf + b_rank))
-        rrf_map[content] = rrf_score
+        # rrf_score = (1 / (k_rrf + f_rank)) + (1 / (k_rrf + b_rank))
+        # rrf_map[content] = rrf_score
+        faiss_contribution = 1 / (k_rrf + f_rank)
+        bm25_contribution = 1 / (k_rrf + b_rank)
+        rrf_score = faiss_contribution + bm25_contribution
+        rrf_map[content] = (rrf_score, faiss_contribution, bm25_contribution)
+
 
     # --------------------------------------------------
     # Step 5. 최종 결과 정렬 및 반환
@@ -133,10 +139,16 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict =
     sorted_contents = sorted(rrf_map.items(), key=lambda x: x[1], reverse=True)[:k]
     
     final_candidates = []
-    for content, score in sorted_contents:
+    # for content, score in sorted_contents:
+    #     doc = content_to_doc[content]
+    #     # 디버깅이나 다음 단계(Re-ranker)에서 점수를 확인할 수 있도록 메타데이터에 RRF 점수를 달아줍니다.
+    #     doc.metadata["rrf_score"] = score 
+    #     final_candidates.append(doc)
+    for content, (score, faiss_c, bm25_c) in sorted_contents:
         doc = content_to_doc[content]
-        # 디버깅이나 다음 단계(Re-ranker)에서 점수를 확인할 수 있도록 메타데이터에 RRF 점수를 달아줍니다.
-        doc.metadata["rrf_score"] = score 
+        doc.metadata["rrf_score"] = score
+        doc.metadata["faiss_contribution"] = faiss_c
+        doc.metadata["bm25_contribution"] = bm25_c
         final_candidates.append(doc)
 
     return final_candidates # 상위 k개의 LangChain Document 리스트 반환

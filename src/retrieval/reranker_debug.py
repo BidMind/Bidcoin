@@ -40,7 +40,7 @@ def rerank_and_score(query: str, candidates: list, top_n: int = 3):
     logger.info(f"📚 후보 문서 수: {len(candidates)}개\n" + "-"*60)
 
     for i, doc in enumerate(candidates):
-        inputs = _tokenizer(query, doc.page_content, return_tensors="pt", truncation=True, max_length=512).to(_device)
+        inputs = _tokenizer(query, doc.page_content, return_tensors="pt", truncation=True, max_length=4096).to(_device)
         
         with torch.no_grad():
             logit = _model(**inputs).logits[0][0].item()
@@ -52,6 +52,11 @@ def rerank_and_score(query: str, candidates: list, top_n: int = 3):
             
             logger.info(f"[후보 {i+1}] 미리보기: {preview_text}...")
             logger.info(f"   ⚖️ Raw 로짓(Logit): {logit:.4f}  ➡️  Sigmoid 확률: {prob:.4f}")
+            
+            # 기여도 로그 추가
+            faiss_c = doc.metadata.get("faiss_contribution", 0)
+            bm25_c = doc.metadata.get("bm25_contribution", 0)
+            logger.info(f"   📊 FAISS 기여: {faiss_c:.4f} | BM25 기여: {bm25_c:.4f}")
             
             if prob < 0.01:
                 logger.warning("   ⚠️ [경고] 확률이 0에 수렴합니다! (관련 없는 문서이거나, 핵심 내용이 512토큰 뒤에 잘렸습니다.)")
