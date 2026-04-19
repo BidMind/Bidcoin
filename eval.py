@@ -17,7 +17,7 @@ from rag_api_v4 import get_rag_context
 from src.generation.generator import BidCoinGenerator
 from src.generation.schemas import RetrievedContext, RetrievalResult
 from src.evaluation.evaluator import Evaluator
-from src.evaluation.question_sets import get_all, get_by_category
+from src.evaluation.question_sets import get_all, get_by_category, get_hard
 
 # ─── Generator 1회 초기화 (질문마다 재생성하지 않음) ─────────────────────────
 _generator_instance: BidCoinGenerator | None = None
@@ -43,20 +43,25 @@ def _retriever(query: str) -> list[dict]:
     Evaluator가 요구하는 retriever 시그니처 래퍼.
       (query: str) -> List[{"id": str, "text": str}]
 
-    question_sets.py 의 question 을 그대로 RAG 파이프라인에 전달하고,
-    반환된 contexts 의 source_file 을 id 로 사용한다.
+    RAG는 문서당 여러 청크를 반환할 수 있다. Evaluator의 retrieval 지표
+    (Precision@K·MRR·NDCG)는 문서 단위 relevant_ids 와 비교하므로,
+    같은 source_file 의 청크를 하나로 병합해야 지표가 왜곡되지 않는다.
+    - id   : 첫 청크의 source_file (삽입 순서 보존 → MRR/NDCG 정확도 유지)
+    - text : 동일 문서의 모든 청크 텍스트를 이어붙임 (faithfulness 평가에 활용)
     전체 메타데이터는 _retrieval_cache 에 보존해 generator 에서 재사용한다.
     """
     raw = get_rag_context(query, [])
     full_contexts = raw.get("contexts", [])
-    _retrieval_cache[query] = full_contexts          # 메타데이터 보존
-    return [
-        {
-            "id":   ctx.get("source_file", ctx.get("chunk_id", "unknown")),
-            "text": ctx.get("text", ""),
-        }
-        for ctx in full_contexts
-    ]
+    _retrieval_cache[query] = full_contexts
+
+    merged: dict[str, dict] = {}
+    for ctx in full_contexts:
+        source = ctx.get("source_file", ctx.get("chunk_id", "unknown"))
+        if source not in merged:
+            merged[source] = {"id": source, "text": ctx.get("text", "")}
+        else:
+            merged[source]["text"] += "\n" + ctx.get("text", "")
+    return list(merged.values())
 
 
 def _generator(query: str, contexts: list[str]) -> str:
@@ -160,13 +165,19 @@ def main() -> None:
     parser.add_argument("--basic",    action="store_true", help="기본 평가만 실행 (빠름, LLM 불필요)")
     parser.add_argument("--judge",    action="store_true", help="LLM-as-Judge 평가만 실행")
     parser.add_argument("--category", type=str, default=None,
-                        help="특정 카테고리만 평가 (fact / condition / summary / compare / recommend / follow_up / refusal / evidence / complex)")
+                        help="특정 카테고리만 평가 (금액 / 기관 / 기간 / 사업내용 / 복합 / 추천 / 비교 / 확인불가 / 후속 / 종합 / 다문서추천 / 인사이트)")
+    parser.add_argument("--hard", action="store_true", help="난이도 '상' 질문만 평가 (Q36–Q47)")
     parser.add_argument("--output", "-o", type=str, default=None,
                         help="JSON 결과 저장 경로 (기본: eval_results_<timestamp>.json)")
     args = parser.parse_args()
 
     # question_sets.py 에서 질문 로드
-    question_items = get_by_category(args.category) if args.category else get_all()
+    if args.hard:
+        question_items = get_hard()
+    elif args.category:
+        question_items = get_by_category(args.category)
+    else:
+        question_items = get_all()
     print(f"\n평가 질문 수: {len(question_items)}개"
           + (f"  (카테고리: {args.category})" if args.category else "  (전체)"))
     for q in question_items:
