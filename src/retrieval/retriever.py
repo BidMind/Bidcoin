@@ -29,25 +29,49 @@ def korean_tokenizer(text: str) -> list[str]:
 # ==========================================
 # [메인 검색기] 하이브리드 검색 함수
 # ==========================================
-# --- [신규 추가] 필터 검사 함수 ---
+# # --- [신규 추가] 필터 검사 함수 ---
+# def pass_metadata_filter(metadata: dict, filters: dict) -> bool:
+#     """문서의 메타데이터가 필터 조건(발주 기관, 사업명 등)을 포함하는지 검사합니다."""
+#     if not filters:
+#         return True # 필터가 없으면 무조건 통과
+        
+#     for filter_key, filter_val in filters.items():
+#         if filter_key in metadata:
+#             doc_val = str(metadata[filter_key]).replace(" ", "")
+#             target_vals = [v.strip().replace(" ", "") for v in filter_val.split(",")]
+            
+#             # 여러 타겟(예: 한영대, 한국대) 중 하나라도 문서 메타데이터에 포함되어 있으면 통과
+#             if any(target in doc_val or doc_val in target for target in target_vals):
+#                 continue
+#             return False # 하나라도 매칭 실패 시 즉시 탈락
+#     return True
+
 def pass_metadata_filter(metadata: dict, filters: dict) -> bool:
     """문서의 메타데이터가 필터 조건(발주 기관, 사업명 등)을 포함하는지 검사합니다."""
     if not filters:
-        return True # 필터가 없으면 무조건 통과
-        
+        return True
+
     for filter_key, filter_val in filters.items():
         if filter_key in metadata:
             doc_val = str(metadata[filter_key]).replace(" ", "")
             target_vals = [v.strip().replace(" ", "") for v in filter_val.split(",")]
-            
-            # 여러 타겟(예: 한영대, 한국대) 중 하나라도 문서 메타데이터에 포함되어 있으면 통과
-            if any(target in doc_val or doc_val in target for target in target_vals):
+
+            # 수정 전: target in doc_val or doc_val in target (엄격)
+            # 수정 후: target을 2글자씩 쪼개서 하나라도 포함되면 통과 (완화)
+            def is_match(target: str, doc: str) -> bool:
+                if target in doc or doc in target:
+                    return True
+                # target을 2글자 단위로 쪼개서 하나라도 doc에 있으면 통과
+                chunks = [target[i:i+2] for i in range(len(target) - 1)]
+                return any(chunk in doc for chunk in chunks)
+
+            if any(is_match(target, doc_val) for target in target_vals):
                 continue
-            return False # 하나라도 매칭 실패 시 즉시 탈락
+            return False
     return True
 
 # [수정]
-def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict = None, k: int = 10):
+def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict = None, k: int = 10, alpha: float = 0.5):
     """
     [기능] FAISS(의미)와 BM25(키워드) 검색을 결합한 하이브리드 검색을 수행합니다.
     - semantic_query: 의미 기반(벡터) 검색을 위한 긴 텍스트 (예: HyDE로 생성된 가상 문서)
@@ -128,7 +152,7 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict =
         # rrf_map[content] = rrf_score
         faiss_contribution = 1 / (k_rrf + f_rank)
         bm25_contribution = 1 / (k_rrf + b_rank)
-        rrf_score = faiss_contribution + bm25_contribution
+        rrf_score = alpha * faiss_contribution + (1 - alpha) * bm25_contribution
         rrf_map[content] = (rrf_score, faiss_contribution, bm25_contribution)
 
 
