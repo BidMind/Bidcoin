@@ -13,7 +13,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from rag_api_v2 import get_rag_context2
+from rag_api_v4 import get_rag_context
 from src.generation.generator import BidCoinGenerator
 from src.generation.schemas import RetrievalResult
 
@@ -64,7 +64,7 @@ def run_rag(query: str, chat_history: list[dict]) -> tuple[str, list[str], str]:
     status       : "CHITCHAT" | "SEARCH_SUCCESS" | "NO_INFO"
     """
     recent_history = trim_history(chat_history)
-    raw_result     = get_rag_context2(query, recent_history)
+    raw_result     = get_rag_context(query, recent_history)
     status         = raw_result.get("status", "NO_INFO")
 
     retrieval_result = RetrievalResult.model_validate(raw_result)

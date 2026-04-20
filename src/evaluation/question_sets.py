@@ -58,7 +58,7 @@ QUESTION_SET: List[Dict] = [
     {
         "id": "Q04",
         "question": "전기안전 관제시스템 보안 모듈 개발 용역의 사업 금액은?",
-        "answer": "222,000,000원",
+        "answer": "222,000,000원 또는 2.2218억원",
         "relevant_ids": ["R25BK00559883"],
         "category": "금액",
         "format": "fact",
