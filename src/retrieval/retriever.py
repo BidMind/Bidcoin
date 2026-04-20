@@ -13,10 +13,6 @@ STOP_TAGS = {'JKS', 'JKC', 'JKG', 'JKO', 'JKB', 'JKV', 'JKQ',
              'JX', 'JC', 'SF', 'SP', 'SS', 'SE', 'SO', 'SW', 'SB'}
 
 def korean_tokenizer(text: str) -> list[str]:
-    """
-    사용자의 질문을 BM25가 이해할 수 있는 핵심 단어(토큰)들의 리스트로 변환합니다.
-    예: "한영대학교 사업의 예산은?" -> ["한영대학교", "사업", "예산"]
-    """
     try:
         tokens = kiwi.tokenize(str(text))
         # 불용어가 아니고 길이가 2글자 이상인 단어만 추출합니다.
@@ -151,4 +147,21 @@ def retrieve_candidates(semantic_query: str, keyword_query: str, filters: dict =
         doc.metadata["bm25_contribution"] = bm25_c
         final_candidates.append(doc)
 
+    # ==================================================
+    # Step 6. Fallback (유연한 재검색)
+    # ==================================================
+    # 필터를 적용했는데 결과가 너무 적게(1개 이하) 나왔다면, 기관명 오기입으로 간주!
+    if filters and len(final_candidates) <= 1:
+        print(f"⚠️ [검색 경고] '{filters}' 필터 적용 시 문서를 찾지 못했습니다!")
+        print("   -> 필터를 해제하고 유연한 통합 검색(Fallback)을 재시도합니다...")
+        
+        # filters 인자를 강제로 비우고(None) 자기 자신을 한 번 더 호출합니다.
+        # 이렇게 하면 '체육인재육성재단 스포츠윤리센터'처럼 붙어있는 이름도 본문 내용 기반으로 싹쓸이해옵니다.
+        return retrieve_candidates(
+            semantic_query=semantic_query, 
+            keyword_query=keyword_query, 
+            filters=None, # 핵심! 필터 무시
+            k=k
+        )
+    
     return final_candidates # 상위 k개의 LangChain Document 리스트 반환
