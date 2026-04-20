@@ -213,3 +213,9 @@ category
 | `EMBED_MODEL` | 선택 | `text-embedding-3-small` | OpenAI 임베딩 모델 |
 | `RERANK_MODEL` | 선택 | `BAAI/bge-reranker-v2-m3` | HuggingFace 재정렬 모델 ID |
 | `CLAUDE_API_KEY` | 선택 | — | Claude 전환 예비용 |
+
+## 보고서 파일
+https://www.notion.so/3480b7469455805793fbd1ff2854ba99?source=copy_link
+
+## 협업일지
+https://www.notion.so/Daily-4-0870b7469455830c888901126c96b2eb?source=copy_link
