@@ -16,8 +16,8 @@ from src.modules.evaluator import evaluate_contexts
 from src.retrieval.retriever import retrieve_candidates
 from src.retrieval.reranker_debug import rerank_and_score
 
-SCORE_THRESHOLD = 0.6  # 랭킹 점수 임계값
-PASS_THROUGH_THRESHOLD = 0.85 # 프리패스 기준 점수
+SCORE_THRESHOLD = 0.25  # 랭킹 점수 임계값
+PASS_THROUGH_THRESHOLD = 0.5 # 프리패스 기준 점수
 
 def get_rag_context(query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
