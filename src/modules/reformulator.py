@@ -65,6 +65,11 @@ def reformulate_query(query: str, chat_history: list = None) -> dict:
 
         [필터 추출 규칙]
         - 질문에 특정 발주기관, 사업명, 금액, 일정 등이 명시되어 있으면 filters에 넣는다.
+        (예: "N억 이상" → {{"min_budget": N*100000000}} 형태로 추출한다.)
+        (예: "N억 이하" → {{"max_budget": N*100000000}} 형태로 추출한다.)
+        (예: "N억~M억" → {{"min_budget": N*100000000, "max_budget": M*100000000}} 형태로 추출한다)
+        (예: "N월 N일 이전 마감", "N월까지" → {{"deadline_before": "YYYY-MM-DD 00:00:00"}} 형태로 추출한다)
+        (예: "N월 N일 이후 마감", "N월부터" → {{"deadline_after": "YYYY-MM-DD 00:00:00"}} 형태로 추출한다)
         - 현재 질문에 명시되지 않은 기관명, 사업명, 금액, 일정은 queries나 filters에 추가하지 않는다.
         - 대화 기록의 기관명, 사업명, 금액, 일정은 현재 질문에서 '그거', '이 사업', '위 공고'처럼 다시 참조하는 경우에만 queries나 filters에 사용할 수 있다.
         - 명시되지 않으면 해당 filters는 비워둔다.
@@ -85,6 +90,22 @@ def reformulate_query(query: str, chat_history: list = None) -> dict:
         "filters": {{
             "발주 기관": "한영대학교, 한국대학교",
             "사업명": "학사정보시스템, 차세대 시스템"
+        }}
+        }}
+         
+        [출력 예시 3]
+        {{
+        "queries": ["대규모 정보시스템 구축 사업 공고"],
+        "filters": {{
+            "min_budget": 500000000
+        }}
+        }}
+
+        [출력 예시 4]
+        {{
+        "queries": ["마감일 임박 시스템 구축 공고"],
+        "filters": {{
+            "deadline_before": "2024-08-31 00:00:00"
         }}
         }}
         """),
