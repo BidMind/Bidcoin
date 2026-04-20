@@ -6,64 +6,49 @@
 #   3) python -m pip install -r requirements.txt
 #
 # Notes:
-# - This file covers the project's full working set: data processing, document loading,
-#   HWP/PDF handling, chunking, embedding, vector search, Hugging Face generation,
-#   LangChain integration, API-based LLM expansion, app serving, and testing.
 # - Some HWP workflows still work better with system tools such as `hwp5txt` or `libreoffice`.
-# - `bitsandbytes` is intentionally excluded here because it is GPU/CUDA sensitive.
+# - `bitsandbytes` is intentionally excluded because it is GPU/CUDA sensitive.
+# - `kiwipiepy` requires a C++ build toolchain on some platforms (apt install build-essential).
 
 # Core data processing
 pandas
 numpy
-scikit-learn
 rank-bm25
 
-# Document parsing and file handling
-olefile
-pyhwp
-pypdf
-pdfplumber
-python-docx
+# Document parsing
+olefile               # HWP binary container parsing
+pymupdf               # PDF parsing (imported as fitz)
+beautifulsoup4        # HWP HTML/XML text extraction (imported as bs4)
 
-# Hugging Face / local model stack
+# Korean NLP
+kiwipiepy             # Kiwi morphological analyzer — BM25 tokenization
+
+# ML / Reranking
 torch
-transformers
-sentence-transformers
-accelerate
+transformers          # Cross-Encoder reranker (BAAI/bge-reranker-v2-m3)
+sentence-transformers # Embedding model loader
 
 # Vector stores
 faiss-cpu
-chromadb
 
 # LangChain stack
 langchain
 langchain-core
 langchain-community
 langchain-text-splitters
-langchain-huggingface
+langchain-openai
 
-# API-based model expansion
+# API
 openai
-anthropic
-google-generativeai
-cohere
-tiktoken
+python-dotenv
 
 # App / serving
 streamlit
-fastapi
-uvicorn
+streamlit-pdf-viewer
 
-# Notebook integration
-ipykernel
-jupyter
-notebook
-
-# Testing
-pytest
-
-# Utilities
-requests
-sqlalchemy
-jsonschema
+# Schema validation
 pydantic
+
+# Dev / testing
+ipykernel
+pytest

@@ -1,0 +1,54 @@
+# 권장 환경:
+#   Python 3.12
+# 가상환경 또는 conda 환경이 이미 있는 경우:
+#   1) 해당 환경을 활성화
+#   2) python -m pip install --upgrade "pip<26" "setuptools==81.0.0" wheel
+#   3) python -m pip install -r requirements_kr.txt
+#
+# 참고:
+# - `kiwipiepy`는 일부 플랫폼에서 C++ 빌드 도구가 필요합니다 (apt install build-essential).
+# - `bitsandbytes`는 GPU/CUDA 의존적이므로 의도적으로 제외되어 있습니다.
+# - 일부 HWP 문서는 `libreoffice`를 시스템 도구로 설치하면 파싱이 더 잘 됩니다.
+
+# 핵심 데이터 처리
+pandas
+numpy
+rank-bm25
+
+# 문서 파싱
+olefile               # HWP 바이너리 컨테이너 파싱
+pymupdf               # PDF 파싱 (fitz로 임포트)
+beautifulsoup4        # HWP HTML/XML 텍스트 추출 (bs4로 임포트)
+
+# 한국어 자연어 처리
+kiwipiepy             # Kiwi 형태소 분석기 — BM25 토크나이저
+
+# 머신러닝 / 재정렬
+torch
+transformers          # Cross-Encoder 재정렬기 (BAAI/bge-reranker-v2-m3)
+sentence-transformers # 임베딩 모델 로더
+
+# 벡터 저장소
+faiss-cpu
+
+# LangChain 스택
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-openai
+
+# API
+openai
+python-dotenv
+
+# 앱 / 서빙
+streamlit
+streamlit-pdf-viewer
+
+# 스키마 검증
+pydantic
+
+# 개발 / 테스트
+ipykernel
+pytest
