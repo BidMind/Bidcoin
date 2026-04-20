@@ -215,7 +215,7 @@ category
 | `CLAUDE_API_KEY` | 선택 | — | Claude 전환 예비용 |
 
 ## 보고서 파일
-https://www.notion.so/3480b7469455805793fbd1ff2854ba99?source=copy_link
+본문 프로젝트_최종보고서.pdf 참고
 
 ## 협업일지
 https://www.notion.so/Daily-4-0870b7469455830c888901126c96b2eb?source=copy_link
