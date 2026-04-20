@@ -214,3 +214,10 @@ category
 | `EMBED_MODEL` | No | `text-embedding-3-small` | OpenAI embedding model |
 | `RERANK_MODEL` | No | `BAAI/bge-reranker-v2-m3` | HuggingFace reranker model ID |
 | `CLAUDE_API_KEY` | No | — | Reserved for Claude migration |
+
+## Project Final Report
+read 프로젝트_최종보고서.pdf(Written in Korean)
+
+## Daily Coordinate Records
+https://www.notion.so/Daily-4-0870b7469455830c888901126c96b2eb?source=copy_link
+
